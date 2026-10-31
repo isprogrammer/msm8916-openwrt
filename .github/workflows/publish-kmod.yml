@@ -1,0 +1,281 @@
+name: Publish Kernel Modules
+
+# Hotfix path for kmod-* packages: rebuild kernel modules against the SAME
+# kernel configuration as the published firmware, splice them into the
+# ALREADY PUBLISHED targets feed and re-index + re-sign it.
+#
+# ## What this CANNOT do
+#
+# Add a module that the released kernel config does not already contain.
+# Every kmod-* depends on
+#
+#     kernel (= <version>~<vermagic>-r<release>)      include/kernel.mk:216
+#
+# and <vermagic> is the md5 of every =y/=m line in the kernel .config.  Adding
+# a `CONFIG_PACKAGE_kmod-x=m` therefore changes vermagic, and the new module
+# would be refused by every device still running the released kernel.  New
+# modules need a firmware release; this workflow only rebuilds modules the
+# release already carries (a driver fix, a repackaged .ko).
+#
+# ## Why a release bump is usually needed
+#
+# A rebuilt module keeps the same version string unless LINUX_RELEASE moves, and
+# apk only installs a strictly newer version -- so a plain rebuild is invisible
+# to devices.  `bump_release=true` patches LINUX_RELEASE in the tree for this
+# run only (1 -> 2), which re-versions the dummy `kernel` package and every
+# kmod.  The real kernel image is unchanged (vermagic stays the same), so
+# devices pick the new modules up with `apk upgrade` and no reflash.
+#
+# Dispatch example:
+#   gh workflow run publish-kmod.yml --ref main \
+#     -f kmods="kmod-ifb kmod-sched" -f dry_run=false -f bump_release=true
+
+on:
+  workflow_dispatch:
+    inputs:
+      kmods:
+        description: "Space-separated kmod names to rebuild (e.g. 'kmod-ifb kmod-sched'). Must already be =m in the board diffconfig."
+        required: true
+        type: string
+      base:
+        description: "Feed base to publish into (releases/<base>). Empty = derive from ./version"
+        required: false
+        default: ""
+        type: string
+      board:
+        description: "Board config to build with (the kernel config is target-wide, so any board works)"
+        required: false
+        default: "hmuf02v5"
+        type: string
+      checkout_ref:
+        description: "Tag or branch whose tree to build from. Must be the release that produced the published feed. Empty = the ref this run was dispatched from."
+        required: false
+        default: ""
+        type: string
+      bump_release:
+        description: "Bump LINUX_RELEASE for this run so devices see a newer kmod version. Required for the fix to reach them."
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: "Build and verify, then stop before pushing to gh-pages. Keep this on for the first run."
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-kmod
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: kmods
+    runs-on: ubuntu-latest
+
+    env:
+      KMODS: ${{ inputs.kmods }}
+      BOARD: ${{ inputs.board }}
+      ARCH: aarch64_generic
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.checkout_ref || github.ref_name }}
+
+      - name: Free Disk Space on Runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /usr/local/lib/android
+          sudo apt-get clean
+
+      - name: Resolve feed base and validate the kmod list
+        id: vars
+        run: |
+          set -euo pipefail
+          BASE="${{ inputs.base }}"
+          if [ -z "$BASE" ]; then BASE="$(sed 's/-r[0-9]*$//' version)"; fi
+          VERSION="$(cat version)"
+          echo "base=${BASE}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Feed base: ${BASE}   version: ${VERSION}   board: ${BOARD}"
+          [ -n "$KMODS" ] || { echo "::error::Pass at least one kmod."; exit 1; }
+          # A kmod that is not already =m in the diffconfig would change the
+          # kernel vermagic, and devices on the released kernel would reject it.
+          bad=0
+          for k in $KMODS; do
+            if grep -qx "CONFIG_PACKAGE_${k}=m" "diffconfigs/${BOARD}"; then
+              echo "  ok   ${k}"
+            else
+              echo "::error::${k} is not '=m' in diffconfigs/${BOARD}."
+              bad=1
+            fi
+          done
+          if [ "$bad" = "1" ]; then
+            echo "::error::Adding a new module changes the kernel vermagic, so it cannot be hotfixed."
+            echo "::error::Add it to diffconfigs/ and cut a firmware release instead."
+            exit 1
+          fi
+
+      - name: Cache OpenWrt Downloads & Toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt/dl
+            openwrt/staging_dir/toolchain-aarch64_generic_gcc-14.3.0_musl
+            openwrt/staging_dir/host
+          key: openwrt-cache-${{ steps.vars.outputs.base }}-${{ hashFiles('openwrt/feeds.conf.default', 'diffconfigs/hmuf02v5') }}-${{ github.run_id }}
+          restore-keys: |
+            openwrt-cache-${{ steps.vars.outputs.base }}-${{ hashFiles('openwrt/feeds.conf.default', 'diffconfigs/hmuf02v5') }}-
+            openwrt-cache-${{ steps.vars.outputs.base }}-
+            openwrt-cache-
+
+      - name: Build Docker Builder Image & Prepare OpenWrt Tree
+        env:
+          APK_SIGNING_KEY: ${{ secrets.APK_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          ./build.sh prepare
+          if [ -z "$APK_SIGNING_KEY" ]; then
+            echo "::error::APK_SIGNING_KEY secret is not set; the re-signed index would be untrusted."
+            exit 1
+          fi
+          printf '%s\n' "$APK_SIGNING_KEY" > openwrt/private-key.pem
+
+      - name: Optionally bump LINUX_RELEASE
+        if: inputs.bump_release
+        run: |
+          set -euo pipefail
+          F=openwrt/include/kernel-version.mk
+          OLD="$(sed -n 's/^LINUX_RELEASE?=\([0-9]*\)$/\1/p' "$F" | head -1)"
+          [ -n "$OLD" ] || { echo "::error::No LINUX_RELEASE?=<n> in ${F}"; exit 1; }
+          NEW=$((OLD + 1))
+          sed -i "s/^LINUX_RELEASE?=.*/LINUX_RELEASE?=${NEW}/" "$F"
+          echo "LINUX_RELEASE ${OLD} -> ${NEW} (this run only; not committed)"
+
+      - name: Fetch the published targets feed
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE="${{ steps.vars.outputs.base }}"
+          git clone --depth 1 --branch gh-pages \
+            "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/gh-pages \
+            || { echo "::error::Cannot clone the gh-pages branch."; exit 1; }
+          SRC="/tmp/gh-pages/releases/${BASE}/targets/msm89xx/msm8916/packages"
+          if [ ! -d "$SRC" ]; then
+            echo "::error::No published targets feed at releases/${BASE} on gh-pages."; exit 1
+          fi
+          mkdir -p openwrt/bin/targets/msm89xx/msm8916/packages
+          cp -a "$SRC/." openwrt/bin/targets/msm89xx/msm8916/packages/
+          echo "Restored $(find openwrt/bin/targets/msm89xx/msm8916/packages -maxdepth 1 -name '*.apk' | wc -l) .apk from releases/${BASE}"
+          find openwrt/bin/targets/msm89xx/msm8916/packages -maxdepth 1 -name '*.apk' -printf '%f\n' \
+            | sort > /tmp/feed-before-files.txt
+
+      - name: Build the kernel (populates Module.symvers and the configured tree)
+        run: ./build.sh kernel "$BOARD"
+
+      - name: Build the kernel modules
+        run: ./build.sh package kernel/linux "$BOARD"
+
+      - name: Verify every requested kmod was produced
+        run: |
+          set -euo pipefail
+          for k in $KMODS; do
+            if ls openwrt/bin/targets/msm89xx/msm8916/packages/${k}-*.apk >/dev/null 2>&1; then
+              printf '  %-28s %s\n' "$k" "$(ls openwrt/bin/targets/msm89xx/msm8916/packages/${k}-*.apk | xargs -n1 basename | tr '\n' ' ')"
+            else
+              echo "::error::No .apk was produced for ${k}."; exit 1
+            fi
+          done
+
+      - name: Re-index and re-sign the targets feed
+        run: |
+          set -euo pipefail
+          docker compose -f devenv/docker-compose.yml exec -T builder bash -lc "
+            umask 022
+            cd /repo/openwrt/bin/targets/msm89xx/msm8916/packages
+            ls *.apk >/dev/null
+            /repo/openwrt/staging_dir/host/bin/apk mkndx \
+              --root /repo/openwrt \
+              --keys-dir /repo/openwrt \
+              --allow-untrusted \
+              --sign /repo/openwrt/private-key.pem \
+              --output packages.adb *.apk
+            /repo/openwrt/staging_dir/host/bin/apk adbdump --format json packages.adb | \
+              /repo/openwrt/scripts/make-index-json.py -f apk -a aarch64_generic - > index.json
+          "
+          echo "Re-indexed $(ls openwrt/bin/targets/msm89xx/msm8916/packages/*.apk | wc -l) packages"
+
+      - name: Verify nothing fell out of the feed
+        run: |
+          set -euo pipefail
+          # Same rule as publish-package.yml: compare package NAMES, never .apk
+          # counts -- a rebuilt dependency prunes its superseded version.
+          pkgname() { sed -E 's/-[0-9][^-]*-r[0-9]+\.apk$//'; }
+          pkgname < /tmp/feed-before-files.txt | sort -u > /tmp/before.txt
+          find openwrt/bin/targets/msm89xx/msm8916/packages -maxdepth 1 -name '*.apk' -printf '%f\n' \
+            | pkgname | sort -u > /tmp/after.txt
+          lost="$(comm -23 /tmp/before.txt /tmp/after.txt || true)"
+          if [ -n "$lost" ]; then
+            echo "::error::These packages fell out of the targets feed - refusing to publish:"
+            printf '  %s\n' $lost
+            exit 1
+          fi
+          echo "OK: $(wc -l < /tmp/before.txt) -> $(wc -l < /tmp/after.txt) package names, none lost"
+
+      - name: Publish to gh-pages
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          BASE="${{ steps.vars.outputs.base }}"
+          FULL="${{ steps.vars.outputs.version }}"
+          for DIR in $(printf '%s\n' "$BASE" "$FULL" | sort -u); do
+            DEST="/tmp/gh-pages/releases/${DIR}/targets/msm89xx/msm8916/packages"
+            if [ ! -d "$DEST" ]; then
+              echo "::warning::releases/${DIR}/targets/... does not exist; skipping."
+              continue
+            fi
+            echo "Updating releases/${DIR}"
+            cp -a openwrt/bin/targets/msm89xx/msm8916/packages/. "$DEST/"
+          done
+          [ -f openwrt/public-key.pem ] && cp -f openwrt/public-key.pem /tmp/gh-pages/public-key.pem || true
+          cd /tmp/gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "::warning::Nothing changed on gh-pages - was bump_release on?"
+            exit 0
+          fi
+          git commit -m "feed: rebuild ${KMODS} in releases/${BASE} (${FULL})"
+          git push origin gh-pages
+
+      - name: Summarise
+        if: always()
+        run: |
+          set -euo pipefail
+          BASE="${{ steps.vars.outputs.base }}"
+          {
+            echo "### Kernel modules: ${KMODS}"
+            echo
+            echo "Board: \`${BOARD}\`  ·  dry run: \`${{ inputs.dry_run }}\`  ·  release bump: \`${{ inputs.bump_release }}\`"
+            echo
+            echo "Feed: https://akbar-npj.github.io/msm8916-openwrt/releases/${BASE}/targets/msm89xx/msm8916/packages/"
+            echo
+            echo "Built:"
+            echo '```'
+            for k in $KMODS; do
+              ls openwrt/bin/targets/msm89xx/msm8916/packages/${k}-*.apk 2>/dev/null | xargs -r -n1 basename || true
+            done
+            echo '```'
+            echo
+            echo "On the device:"
+            echo '```'
+            echo "apk update"
+            echo "apk upgrade"
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
