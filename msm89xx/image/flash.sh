@@ -41,8 +41,10 @@ rootfs_path=""
 gpt_path=""
 recovery_path=""
 firmware_dir=""
-DUMP_DIR=""           # --mode backup partition-wise output dir (default ./dump)
+DUMP_DIR=""           # --mode backup partition-wise output dir (default ./<device>-dump)
 DUMP_MODE=""          # --mode backup method: full | partitions (empty = prompt)
+DEVICE_NAME=""        # --device-name: names the dump; resolved/prompted if empty
+DEVICE_NAME_FILE=".flash-device-name"   # remembers which unit a dump belongs to
 
 die() {
     echo "[-] Error: $*" >&2
@@ -66,13 +68,17 @@ Options:
                      recovery), wiping the overlay. boot/rootfs are kept, so
                      follow with --mode update on an older rootfs (see the
                      recovery README: the boot-count hook lives in userspace).
-  --mode backup      Dump the whole device before flashing. Two methods:
-                       1) full raw image   -> ./dump.bin  (edl rf, single file)
-                       2) partition-wise   -> ./dump/     (edl rl, one .bin/part)
+  --mode backup      Dump the whole device before flashing. The dump is named
+                     after the device so a dump from another unit is never
+                     mistaken for this one. Two methods:
+                       1) full raw image   -> ./<device>-dump.bin  (edl rf)
+                       2) partition-wise   -> ./<device>-dump/      (edl rl)
                      Interactive prompt unless --dump-mode is given.
+  --device-name <n>  Name for this device's dump (also used to match a prior
+                     dump before flashing). Asked interactively if omitted.
   --dump-mode {full|partitions}
                      Force the --mode backup method (default: prompt / partitions).
-  --dump-dir <path>  Output directory for --mode backup partition-wise (default: ./dump).
+  --dump-dir <path>  Output dir for partition-wise dump (default: ./<device>-dump).
   --erase-config     Update mode: wipe the rootfs_data overlay (factory clean).
   --keep-config      Update mode: keep /etc, packages and dumped firmware.
   --yes              Skip the interactive confirmation. Requires --mode.
@@ -125,6 +131,9 @@ parse_args() {
                 [[ "$DUMP_MODE" == "full" || "$DUMP_MODE" == "partitions" ]] \
                     || die "--dump-mode must be 'full' or 'partitions'"
                 shift 2 ;;
+            --device-name)
+                [[ $# -ge 2 ]] || die "--device-name requires an argument"
+                DEVICE_NAME="$2"; shift 2 ;;
             --help|-h)
                 usage; exit 0 ;;
             *)
@@ -157,7 +166,7 @@ show_menu() {
     echo "  3) Repartition an existing OpenWrt install"
     echo "     (rewrites the GPT, adds misc + recovery, wipes the overlay;"
     echo "      boot + rootfs are kept)"
-    echo "  4) Back up the whole device (EDL dump - do this FIRST; choose full or partition-wise)"
+    echo "  4) Back up the whole device (EDL dump - do this FIRST; named after the device)"
     echo
     local choice
     while true; do
@@ -509,24 +518,74 @@ restore_radio() {
     done
 }
 
+# Sanitize a device name into a safe filename component (letters, digits, . _ -).
+sanitize_device_name() {
+    printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-' | sed -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+}
+
+# Best-effort device name straight from edl (eMMC/UFS prod_name). Empty if none.
+# NOTE: prod_name is the chip MODEL, not a per-unit serial, so it is only used as
+# a default suggestion - the user is still asked to name the device.
+edl_device_name() {
+    local out prod="" line
+    out=$(timeout 15 edl getstorageinfo 2>/dev/null) || return 0
+    while IFS= read -r line; do
+        case "$line" in
+            prod_name:*) prod="${line#prod_name:}"; prod="${prod# }" ; break ;;
+        esac
+    done <<< "$out"
+    if [[ -n "$prod" ]]; then printf '%s' "$prod"; fi
+    return 0
+}
+
+# Resolve the name that identifies THIS device's dump. Order: --device-name,
+# a previously saved name, then an edl-derived/board default, then ask the user.
+# The result is stored in DEVICE_NAME and persisted so later runs (migrate/
+# update) can tell this unit's dump apart from another device's.
+resolve_device_name_for_dump() {
+    if [[ -n "$DEVICE_NAME" ]]; then
+        DEVICE_NAME=$(sanitize_device_name "$DEVICE_NAME")
+    elif [[ -s "$DEVICE_NAME_FILE" ]]; then
+        DEVICE_NAME=$(sanitize_device_name "$(cat "$DEVICE_NAME_FILE")")
+    fi
+    if [[ -z "$DEVICE_NAME" ]]; then
+        if [[ ! -t 0 ]]; then
+            die "cannot determine a device name non-interactively; pass --device-name <name>"
+        fi
+        local suggestion
+        suggestion=$(edl_device_name)
+        [[ -n "$suggestion" ]] || suggestion="$BOARD_TOKEN"
+        suggestion=$(sanitize_device_name "$suggestion")
+        [[ -n "$suggestion" ]] || suggestion="device"
+        local entered
+        while true; do
+            read -r -p "Enter a unique name for THIS device (used to name the dump) [$suggestion]: " entered
+            entered=$(sanitize_device_name "${entered:-$suggestion}")
+            if [[ -n "$entered" ]]; then DEVICE_NAME="$entered"; break; fi
+            echo "[!] Name cannot be empty - try again."
+        done
+    fi
+    printf '%s\n' "$DEVICE_NAME" > "$DEVICE_NAME_FILE"
+}
+
 # Dump the ENTIRE device so the user has a complete image they can restore if a
 # flash goes wrong - far more than the 7 radio partitions backup_radio() saves
-# during migrate. Two methods:
-#   full       -> edl rf  ./dump.bin   (one raw image of the whole flash)
-#   partitions -> edl rl  ./dump/      (one .bin per partition; restore selected)
-# Pick with --dump-mode; otherwise an interactive prompt is shown. Non-interactive
-# (no TTY) falls back to partition-wise.
+# during migrate. The dump is NAMED AFTER THE DEVICE so a dump from one unit is
+# never mistaken for another's. Two methods:
+#   full       -> edl rf  ./<device>-dump.bin  (one raw image of the whole flash)
+#   partitions -> edl rl  ./<device>-dump/     (one .bin per partition)
 do_backup() {
     require_cmd edl
+    resolve_device_name_for_dump
 
     local mode="$DUMP_MODE"
     if [[ -z "$mode" ]]; then
         if [[ -t 0 ]]; then
             echo
-            echo "=== Full device dump (EDL) ==="
+            echo "=== Full device dump (EDL) - device: $DEVICE_NAME ==="
             echo "  Back up the ENTIRE device. Choose a method:"
-            echo "    1) Full raw image  (edl rf -> ./dump.bin)  - one file; restore wholesale with: edl wf dump.bin"
-            echo "    2) Partition-wise  (edl rl -> ./dump/)      - one .bin per partition; restore one with: edl w <part> dump/<part>.bin"
+            echo "    1) Full raw image  (edl rf -> ./$DEVICE_NAME-dump.bin)  - one file; restore with: edl wf $DEVICE_NAME-dump.bin"
+            echo "    2) Partition-wise  (edl rl -> ./$DEVICE_NAME-dump/)      - one .bin per partition; restore one with: edl w <part> $DEVICE_NAME-dump/<part>.bin"
             local reply
             read -r -p "Select [1/2] (default 2): " reply
             case "$reply" in
@@ -541,16 +600,17 @@ do_backup() {
 
     case "$mode" in
         full)
+            local out="$DEVICE_NAME-dump.bin"
             echo
-            echo "=== Full device dump: whole flash -> ./dump.bin (edl rf) ==="
+            echo "=== Full device dump: whole flash -> ./$out (edl rf) ==="
             echo "    NOTE: this is the entire eMMC and can be several GB. Be patient."
-            edl rf "dump.bin" || die "edl rf (full dump) failed"
-            echo "[+] Dump complete: $(du -h dump.bin 2>/dev/null | cut -f1) written to ./dump.bin"
-            echo "[!] IMPORTANT: copy ./dump.bin somewhere safe before flashing."
-            echo "    To restore the whole device later: edl wf dump.bin"
+            edl rf "$out" || die "edl rf (full dump) failed"
+            echo "[+] Dump complete: $(du -h "$out" 2>/dev/null | cut -f1) written to ./$out"
+            echo "[!] IMPORTANT: copy ./$out somewhere safe before flashing."
+            echo "    To restore the whole device later: edl wf $out"
             ;;
         partitions|*)
-            DUMP_DIR="${DUMP_DIR:-dump}"
+            DUMP_DIR="${DUMP_DIR:-${DEVICE_NAME}-dump}"
             mkdir -p "$DUMP_DIR"
             echo
             echo "=== Full device dump: all partitions -> ./$DUMP_DIR/ (edl rl) ==="
@@ -564,20 +624,60 @@ do_backup() {
 }
 
 # Warn (and, unless --yes, block) before any destructive operation if the user
-# has not made a full device dump yet. backup_radio() inside do_migrate saves
-# the 7 radio partitions, but a full dump (flash.sh --mode backup) is what lets
-# a botched flash be fully recovered - and the user must keep a COPY of it.
+# has not made a full device dump for THIS device yet. backup_radio() inside
+# do_migrate saves the 7 radio partitions, but a full dump (flash.sh --mode
+# backup) is what lets a botched flash be fully recovered - and the user must
+# keep a COPY of it. The check is keyed on the device name so another unit's
+# dump is never accepted as this one's backup.
 encourage_backup() {
-    if { [[ -d dump ]] && [[ -n "$(ls -A dump 2>/dev/null)" ]]; } || [[ -s dump.bin ]]; then
-        echo "[+] Full dump found (./dump/ or ./dump.bin) - good."
+    local name="$DEVICE_NAME"
+    if [[ -z "$name" && -s "$DEVICE_NAME_FILE" ]]; then
+        name=$(sanitize_device_name "$(cat "$DEVICE_NAME_FILE")")
+    fi
+
+    if [[ -n "$name" ]]; then
+        if [[ -s "${name}-dump.bin" ]] || { [[ -d "${name}-dump" ]] && [[ -n "$(ls -A "${name}-dump" 2>/dev/null)" ]]; }; then
+            echo "[+] Full dump for '$name' found (./${name}-dump.bin or ./${name}-dump/) - good."
+            return 0
+        fi
+        echo
+        echo "!!! BACKUP RECOMMENDED BEFORE FLASHING !!!"
+        echo "    No dump found for this device ('$name')."
+        echo "    Make one first:   flash.sh --mode backup --device-name $name"
+        if [[ "$ASSUME_YES" == true ]]; then
+            echo "[!] --yes set: continuing without a dump for '$name' (not recommended)."
+            return 0
+        fi
+        local reply
+        read -r -p "Continue WITHOUT a full backup for '$name'? (y/N): " reply
+        [[ "$reply" =~ ^[Yy]$ ]] || { echo "[!] Aborted - make a backup first."; exit 0; }
         return 0
     fi
+
+    # No device name known: any dump present may belong to ANOTHER unit.
+    local others
+    others=$(ls -1d -- *-dump.bin *-dump/ 2>/dev/null || true)
+    if [[ -n "$others" ]]; then
+        echo
+        echo "[!] Found dump(s) but no device name is set to match them against:"
+        printf '      %s\n' $others
+        echo "    These may belong to ANOTHER device. Pass --device-name <name> to"
+        echo "    match this unit, or re-run --mode backup to name a fresh dump."
+        if [[ "$ASSUME_YES" == true ]]; then
+            echo "[!] --yes set: continuing without a verified backup (not recommended)."
+            return 0
+        fi
+        local reply
+        read -r -p "Continue WITHOUT a verified backup for this device? (y/N): " reply
+        [[ "$reply" =~ ^[Yy]$ ]] || { echo "[!] Aborted - make a backup first."; exit 0; }
+        return 0
+    fi
+
     echo
     echo "!!! BACKUP RECOMMENDED BEFORE FLASHING !!!"
     echo "    Flashing can be destructive. A full device dump lets you restore"
     echo "    the original firmware if anything goes wrong."
-    echo "    Make one now:   flash.sh --mode backup"
-    echo "    or copy an existing dump into ./dump/ and re-run."
+    echo "    Make one now:   flash.sh --mode backup   (it will ask you to name this device)"
     if [[ "$ASSUME_YES" == true ]]; then
         echo "[!] --yes set: continuing without a full dump (not recommended)."
         return 0
