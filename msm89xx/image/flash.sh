@@ -41,7 +41,8 @@ rootfs_path=""
 gpt_path=""
 recovery_path=""
 firmware_dir=""
-DUMP_DIR=""           # --mode backup output dir (default ./dump)
+DUMP_DIR=""           # --mode backup partition-wise output dir (default ./dump)
+DUMP_MODE=""          # --mode backup method: full | partitions (empty = prompt)
 
 die() {
     echo "[-] Error: $*" >&2
@@ -65,9 +66,13 @@ Options:
                      recovery), wiping the overlay. boot/rootfs are kept, so
                      follow with --mode update on an older rootfs (see the
                      recovery README: the boot-count hook lives in userspace).
-  --mode backup      Dump the whole device to ./dump/ (edl rl) before flashing.
-                     Copy that directory somewhere safe first.
-  --dump-dir <path>  Output directory for --mode backup (default: ./dump).
+  --mode backup      Dump the whole device before flashing. Two methods:
+                       1) full raw image   -> ./dump.bin  (edl rf, single file)
+                       2) partition-wise   -> ./dump/     (edl rl, one .bin/part)
+                     Interactive prompt unless --dump-mode is given.
+  --dump-mode {full|partitions}
+                     Force the --mode backup method (default: prompt / partitions).
+  --dump-dir <path>  Output directory for --mode backup partition-wise (default: ./dump).
   --erase-config     Update mode: wipe the rootfs_data overlay (factory clean).
   --keep-config      Update mode: keep /etc, packages and dumped firmware.
   --yes              Skip the interactive confirmation. Requires --mode.
@@ -114,6 +119,12 @@ parse_args() {
             --dump-dir)
                 [[ $# -ge 2 ]] || die "--dump-dir requires an argument"
                 DUMP_DIR="$2"; shift 2 ;;
+            --dump-mode)
+                [[ $# -ge 2 ]] || die "--dump-mode requires an argument"
+                DUMP_MODE="$2"
+                [[ "$DUMP_MODE" == "full" || "$DUMP_MODE" == "partitions" ]] \
+                    || die "--dump-mode must be 'full' or 'partitions'"
+                shift 2 ;;
             --help|-h)
                 usage; exit 0 ;;
             *)
@@ -146,7 +157,7 @@ show_menu() {
     echo "  3) Repartition an existing OpenWrt install"
     echo "     (rewrites the GPT, adds misc + recovery, wipes the overlay;"
     echo "      boot + rootfs are kept)"
-    echo "  4) Back up the whole device to ./dump/ (EDL dump - do this FIRST)"
+    echo "  4) Back up the whole device (EDL dump - do this FIRST; choose full or partition-wise)"
     echo
     local choice
     while true; do
@@ -498,23 +509,58 @@ restore_radio() {
     done
 }
 
-# Dump the ENTIRE device (every partition) to a directory via EDL, so the user
-# has a complete image they can restore if a flash goes wrong. This is a full
-# Android/OpenWrt dump - far more than the 7 radio partitions backup_radio()
-# saves during migrate. Copy the directory somewhere safe afterwards.
+# Dump the ENTIRE device so the user has a complete image they can restore if a
+# flash goes wrong - far more than the 7 radio partitions backup_radio() saves
+# during migrate. Two methods:
+#   full       -> edl rf  ./dump.bin   (one raw image of the whole flash)
+#   partitions -> edl rl  ./dump/      (one .bin per partition; restore selected)
+# Pick with --dump-mode; otherwise an interactive prompt is shown. Non-interactive
+# (no TTY) falls back to partition-wise.
 do_backup() {
     require_cmd edl
-    DUMP_DIR="${DUMP_DIR:-dump}"
-    mkdir -p "$DUMP_DIR"
-    echo
-    echo "=== Full device dump (EDL) ==="
-    echo "[*] Reading ALL partitions to ./$DUMP_DIR/ (edl rl)"
-    echo "    This is a complete image of the device."
-    echo "    After it finishes, COPY ./$DUMP_DIR/ to a PC / USB stick."
-    echo "    To restore a partition later: edl wl <part> $DUMP_DIR/<part>.bin"
-    edl rl "$DUMP_DIR" || die "edl rl (full dump) failed"
-    echo "[+] Dump complete: $(ls -1 "$DUMP_DIR" 2>/dev/null | grep -c .) partitions in ./$DUMP_DIR/"
-    echo "[!] IMPORTANT: copy ./$DUMP_DIR/ somewhere safe before flashing."
+
+    local mode="$DUMP_MODE"
+    if [[ -z "$mode" ]]; then
+        if [[ -t 0 ]]; then
+            echo
+            echo "=== Full device dump (EDL) ==="
+            echo "  Back up the ENTIRE device. Choose a method:"
+            echo "    1) Full raw image  (edl rf -> ./dump.bin)  - one file; restore wholesale with: edl wf dump.bin"
+            echo "    2) Partition-wise  (edl rl -> ./dump/)      - one .bin per partition; restore one with: edl w <part> dump/<part>.bin"
+            local reply
+            read -r -p "Select [1/2] (default 2): " reply
+            case "$reply" in
+                1) mode="full" ;;
+                *) mode="partitions" ;;
+            esac
+        else
+            mode="partitions"
+            echo "[*] Non-interactive: defaulting to partition-wise dump (edl rl)."
+        fi
+    fi
+
+    case "$mode" in
+        full)
+            echo
+            echo "=== Full device dump: whole flash -> ./dump.bin (edl rf) ==="
+            echo "    NOTE: this is the entire eMMC and can be several GB. Be patient."
+            edl rf "dump.bin" || die "edl rf (full dump) failed"
+            echo "[+] Dump complete: $(du -h dump.bin 2>/dev/null | cut -f1) written to ./dump.bin"
+            echo "[!] IMPORTANT: copy ./dump.bin somewhere safe before flashing."
+            echo "    To restore the whole device later: edl wf dump.bin"
+            ;;
+        partitions|*)
+            DUMP_DIR="${DUMP_DIR:-dump}"
+            mkdir -p "$DUMP_DIR"
+            echo
+            echo "=== Full device dump: all partitions -> ./$DUMP_DIR/ (edl rl) ==="
+            edl rl "$DUMP_DIR" || die "edl rl (full dump) failed"
+            echo "[+] Dump complete: $(ls -1 "$DUMP_DIR" 2>/dev/null | grep -c .) partitions in ./$DUMP_DIR/"
+            echo "[!] IMPORTANT: copy ./$DUMP_DIR/ somewhere safe before flashing."
+            echo "    To restore one partition later: edl w <part> $DUMP_DIR/<part>.bin"
+            echo "    To restore everything later:        edl wl $DUMP_DIR"
+            ;;
+    esac
 }
 
 # Warn (and, unless --yes, block) before any destructive operation if the user
@@ -522,8 +568,8 @@ do_backup() {
 # the 7 radio partitions, but a full dump (flash.sh --mode backup) is what lets
 # a botched flash be fully recovered - and the user must keep a COPY of it.
 encourage_backup() {
-    if [[ -d dump ]] && [[ -n "$(ls -A dump 2>/dev/null)" ]]; then
-        echo "[+] Full dump found in ./dump/ - good."
+    if { [[ -d dump ]] && [[ -n "$(ls -A dump 2>/dev/null)" ]]; } || [[ -s dump.bin ]]; then
+        echo "[+] Full dump found (./dump/ or ./dump.bin) - good."
         return 0
     fi
     echo
