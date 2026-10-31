@@ -321,6 +321,7 @@ CONFIG_PACKAGE_kmod-usb-audio=m
 
 
 
+CONFIG_PACKAGE_kmod-ipt-nfqueue=m
 # CONFIG_FEED_telephony is not set
 # CONFIG_FEED_video is not set
 
