@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: GPL-2.0-only
 #
 # Flash OpenWrt to MSM8916 devices entirely via EDL.
-# Three modes:
+# Four modes:
 #   migrate     - stock Android -> OpenWrt (repartition + bootloader + boot + rootfs)
 #   update      - existing OpenWrt -> OpenWrt (boot + rootfs only)
 #   repartition - existing OpenWrt -> OpenWrt with a new partition table
 #                 (GPT + misc + recovery + overlay wipe; boot/rootfs untouched)
+#   backup      - dump the ENTIRE device (all partitions) to ./dump/ via EDL,
+#                 before you flash anything.  Make a copy of it.
 # Prerequisites: edl
 # Usage: run from the build output directory (bin/targets/...)
 
@@ -39,6 +41,7 @@ rootfs_path=""
 gpt_path=""
 recovery_path=""
 firmware_dir=""
+DUMP_DIR=""           # --mode backup output dir (default ./dump)
 
 die() {
     echo "[-] Error: $*" >&2
@@ -62,6 +65,9 @@ Options:
                      recovery), wiping the overlay. boot/rootfs are kept, so
                      follow with --mode update on an older rootfs (see the
                      recovery README: the boot-count hook lives in userspace).
+  --mode backup      Dump the whole device to ./dump/ (edl rl) before flashing.
+                     Copy that directory somewhere safe first.
+  --dump-dir <path>  Output directory for --mode backup (default: ./dump).
   --erase-config     Update mode: wipe the rootfs_data overlay (factory clean).
   --keep-config      Update mode: keep /etc, packages and dumped firmware.
   --yes              Skip the interactive confirmation. Requires --mode.
@@ -92,8 +98,8 @@ parse_args() {
                 [[ $# -ge 2 ]] || die "--mode requires an argument"
                 MODE="$2"
                 [[ "$MODE" == "migrate" || "$MODE" == "update" || \
-                   "$MODE" == "repartition" ]] \
-                    || die "--mode must be 'migrate', 'update' or 'repartition'"
+                   "$MODE" == "repartition" || "$MODE" == "backup" ]] \
+                    || die "--mode must be 'migrate', 'update', 'repartition' or 'backup'"
                 shift 2
                 ;;
             --erase-config)
@@ -105,6 +111,9 @@ parse_args() {
             --board)
                 [[ $# -ge 2 ]] || die "--board requires an argument"
                 BOARD_TOKEN="$2"; shift 2 ;;
+            --dump-dir)
+                [[ $# -ge 2 ]] || die "--dump-dir requires an argument"
+                DUMP_DIR="$2"; shift 2 ;;
             --help|-h)
                 usage; exit 0 ;;
             *)
@@ -137,6 +146,7 @@ show_menu() {
     echo "  3) Repartition an existing OpenWrt install"
     echo "     (rewrites the GPT, adds misc + recovery, wipes the overlay;"
     echo "      boot + rootfs are kept)"
+    echo "  4) Back up the whole device to ./dump/ (EDL dump - do this FIRST)"
     echo
     local choice
     while true; do
@@ -145,6 +155,7 @@ show_menu() {
             1) MODE="migrate"; return ;;
             2) MODE="update";  return ;;
             3) MODE="repartition"; return ;;
+            4) MODE="backup"; return ;;
             *) echo "[!] Please enter 1, 2 or 3." ;;
         esac
     done
@@ -487,6 +498,49 @@ restore_radio() {
     done
 }
 
+# Dump the ENTIRE device (every partition) to a directory via EDL, so the user
+# has a complete image they can restore if a flash goes wrong. This is a full
+# Android/OpenWrt dump - far more than the 7 radio partitions backup_radio()
+# saves during migrate. Copy the directory somewhere safe afterwards.
+do_backup() {
+    require_cmd edl
+    DUMP_DIR="${DUMP_DIR:-dump}"
+    mkdir -p "$DUMP_DIR"
+    echo
+    echo "=== Full device dump (EDL) ==="
+    echo "[*] Reading ALL partitions to ./$DUMP_DIR/ (edl rl)"
+    echo "    This is a complete image of the device."
+    echo "    After it finishes, COPY ./$DUMP_DIR/ to a PC / USB stick."
+    echo "    To restore a partition later: edl wl <part> $DUMP_DIR/<part>.bin"
+    edl rl "$DUMP_DIR" || die "edl rl (full dump) failed"
+    echo "[+] Dump complete: $(ls -1 "$DUMP_DIR" 2>/dev/null | grep -c .) partitions in ./$DUMP_DIR/"
+    echo "[!] IMPORTANT: copy ./$DUMP_DIR/ somewhere safe before flashing."
+}
+
+# Warn (and, unless --yes, block) before any destructive operation if the user
+# has not made a full device dump yet. backup_radio() inside do_migrate saves
+# the 7 radio partitions, but a full dump (flash.sh --mode backup) is what lets
+# a botched flash be fully recovered - and the user must keep a COPY of it.
+encourage_backup() {
+    if [[ -d dump ]] && [[ -n "$(ls -A dump 2>/dev/null)" ]]; then
+        echo "[+] Full dump found in ./dump/ - good."
+        return 0
+    fi
+    echo
+    echo "!!! BACKUP RECOMMENDED BEFORE FLASHING !!!"
+    echo "    Flashing can be destructive. A full device dump lets you restore"
+    echo "    the original firmware if anything goes wrong."
+    echo "    Make one now:   flash.sh --mode backup"
+    echo "    or copy an existing dump into ./dump/ and re-run."
+    if [[ "$ASSUME_YES" == true ]]; then
+        echo "[!] --yes set: continuing without a full dump (not recommended)."
+        return 0
+    fi
+    local reply
+    read -r -p "Continue WITHOUT a full backup? (y/N): " reply
+    [[ "$reply" =~ ^[Yy]$ ]] || { echo "[!] Aborted - make a backup first."; exit 0; }
+}
+
 # Flash the new GPT via raw sector writes first, so all subsequent flashes use
 # the correct partition offsets from the OpenWrt GPT.
 # gpt_both0.bin layout: [34 sectors primary] [32 sectors backup entries] [1 sector backup header]
@@ -612,6 +666,7 @@ wipe_rootfs_data() {
 
 do_migrate() {
     detect_images_migrate
+    encourage_backup
     extract_firmware
     verify_mbn
     confirm_migrate
@@ -643,6 +698,7 @@ do_migrate() {
 
 do_update() {
     detect_images_update
+    encourage_backup
     prompt_config
     confirm_update
 
@@ -666,6 +722,7 @@ do_update() {
 # the radio partitions completely alone.
 do_repartition() {
     detect_images_repartition
+    encourage_backup
     confirm_repartition
 
     flash_gpt
@@ -717,6 +774,7 @@ main() {
         migrate)     do_migrate ;;
         update)      do_update ;;
         repartition) do_repartition ;;
+        backup)      do_backup ;;
     esac
 }
 
