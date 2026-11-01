@@ -33,14 +33,14 @@ here.
   a 5 s hold → **factory reset**.
 - This is the only board whose failsafe button flow is confirmed working. The
   key is that the polarity is active-high/pull-down — the opposite declaration
-  makes the button completely inert. See [Failsafe](../Failsafe/README.md).
+  makes the button completely inert. See [Failsafe](Failsafe/README.md).
 
 ## SIM
 
 HMUF02-V5 is the **only** board that exposes a `sim-presence` / `sim_hotplug`
 node (TLMM **GPIO 114**, active-high). Physical SIM hot-swap is **implemented
 and live-verified** here (~15 s end to end). See
-[SIM Hot-Swap](../SIM_HOT_SWAP.md).
+[SIM Hot-Swap](SIM_HOT_SWAP.md).
 
 ## Profile feature selection (the full set)
 

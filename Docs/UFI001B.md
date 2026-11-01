@@ -42,7 +42,7 @@ The board patch defines SIM routing hogs:
 | 68 | (aux LTE GPIO) | low |
 
 Physical SIM hot-swap (`sim_hotplug`) is **untested** — no `sim-presence`
-node is exposed. See [SIM Hot-Swap](../SIM_HOT_SWAP.md).
+node is exposed. See [SIM Hot-Swap](SIM_HOT_SWAP.md).
 
 ## Profile feature selection
 
