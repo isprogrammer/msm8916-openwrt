@@ -112,7 +112,7 @@ Recent additions on top of the base port:
 * **Power button** — only mifib-v12 and mf800b have a `pm8941_pwrkey`; see [`Docs/POWER_BUTTON.md`](Docs/POWER_BUTTON.md).
 * **SIM hot-swap** — the `sim-hotplug` service ships and is enabled on **every** board.  The table marks where the `sim_hotplug` line has been **confirmed**: HMUF02-V5 (verified end-to-end, ~15 s) and mifib-v12 (same modem family, enabled, not yet soaked).  A `—` means the line is untested on that board, not that the service is missing — see [`Docs/SIM_HOT_SWAP.md`](Docs/SIM_HOT_SWAP.md).
 
-> The Wi-Fi/PMIC cooling maps are in the **shared `msm8916-ufi.dtsi`** (patch 861), which every board in the target includes, so all seven boards get them. The `a2_pin` modem-rail hold is enabled on the **HMUF02-V5, UZ801, UF02 and HM-MIFIB-V12** boards — all four carry the same HiMI baseband family (`HIMI_U01_MODEM_V1.0`) exposed to the `a2_power.c:1189` quiesce wedge; `UFI003`, `UFI001B` (modem `MPSS.DPM.2.0.2`, V2.0) and `MF800B` do not set it. Everything else applies to every board. Failsafe mode is enabled on **every board** (LED colour varies by board); it has been **live-verified on the HMUF02-V5** only.
+> The Wi-Fi/PMIC cooling maps are in the **shared `msm8916-ufi.dtsi`** (patch 861), which every board in the target includes, so all boards get them. The `a2_pin` modem-rail hold is enabled on the **HMUF02-V5, UZ801, UF02 and HM-MIFIB-V12** boards — all four carry the same HiMI baseband family (`HIMI_U01_MODEM_V1.0`) exposed to the `a2_power.c:1189` quiesce wedge; `UFI003`, `UFI001B` (modem `MPSS.DPM.2.0.2`, V2.0) and `MF800B` do not set it, and **UF896 does not need it** (field-tested on real hardware — no `a2_power.c:1189` quiesce wedge was observed). Everything else applies to every board. Failsafe mode is enabled on **every board** (LED colour varies by board); it has been **live-verified on the HMUF02-V5** only.
 
 ### 🛠️ Adding a new board
 
@@ -243,7 +243,7 @@ chmod +x openwrt-msm89xx-msm8916-<board>-flash.sh
 ./openwrt-msm89xx-msm8916-<board>-flash.sh
 ```
 
-The script shows an interactive menu with **three** choices — **`1` Migrate** (stock Android → OpenWrt), **`2` Update** (existing OpenWrt → OpenWrt) and **`3` Repartition** (add the recovery partition) — choose **`1`** for a first-time migration:
+The script shows an interactive menu with **four** choices — **`1` Migrate** (stock Android → OpenWrt), **`2` Update** (existing OpenWrt → OpenWrt), **`3` Repartition** (add the recovery partition) and **`4` Backup** (full-device EDL dump, recommended before anything else) — choose **`4`** first to make a backup, then **`1`** for a first-time migration:
 
 ```
 === OpenWrt MSM8916 EDL Flash Script ===
@@ -255,14 +255,16 @@ The script shows an interactive menu with **three** choices — **`1` Migrate** 
   3) Repartition an existing OpenWrt install
      (rewrites the GPT, adds misc + recovery, wipes the overlay;
       boot + rootfs are kept)
+  4) Back up the whole device (EDL dump - do this FIRST; named after the device)
 
-Choice [1/2/3]:
+Choice [1/2/3/4]:
 ```
 
 *(For unattended use, `--mode migrate --yes` selects the same path; `./...flash.sh --help` lists all flags.)*
 
 #### What the Script Automatically Handles:
 
+* **Full-Device Dump (recommended first)**: `./...flash.sh --mode backup` reads the **whole device** over EDL — either as one raw image (`edl rf` → `./<device>-dump.bin`) or partition-wise (`edl rl` → `./<device>-dump/`, restore one partition with `edl w <part> <file>`). The dump is **named after the device**: the name comes from `--device-name`, a remembered `.flash-device-name`, or a prompt at backup time, so a dump from one unit is never mistaken for another's. Before any destructive mode the script checks for a dump **for this device** and, unless `--yes`, refuses to continue without one.
 * **Safety Backup**: Backs up all critical device-unique radio/calibration partitions (`fsc`, `fsg`, `modemst1`, `modemst2`, `modem`, `persist`, `sec`) into a local `saved/` directory. Every read is validated; if any backup fails (error, or an empty/short file) the script **aborts before writing anything**, leaving the device untouched.
 * **GPT Repartitioning**: Flashes the OpenWrt partition table (`*-squashfs-gpt_both0.bin`) via raw sector writes (`primary.bin`, `backup_entries.bin`, `backup_header.bin`) to repartition the eMMC safely.
 * **Firmware Extraction & Flashing**: Extracts `aboot.mbn`, `hyp.mbn`, `rpm.mbn`, `sbl1.mbn`, and `tz.mbn` from the board's `*-firmware.zip` and flashes them to the newly repartitioned layout.

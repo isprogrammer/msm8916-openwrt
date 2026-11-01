@@ -81,7 +81,7 @@ What reads it:
 | `build.sh prepare_config` | stamps `CONFIG_VERSION_NUMBER` into `.config` → `/etc/openwrt_release` → `DISTRIB_RELEASE` |
 
 That last row is the one that bites. `CONFIG_VERSION_NUMBER` used to be a
-hand-maintained copy inside all seven `diffconfigs/` files, and r3 shipped with it
+hand-maintained copy inside all `diffconfigs/` files, and r3 shipped with it
 still reading `25.12.6-r2` — so every r3 image *reported* r2. `firmware-upgrade`
 compares the device's `DISTRIB_RELEASE` against the manifest, so such a device
 believes it is one release behind forever and re-offers the same update on every
@@ -150,7 +150,7 @@ unsquashfs -d /tmp/chk/root /tmp/chk/sysupgrade-generic-mifib-v12/root
 grep DISTRIB_RELEASE /tmp/chk/root/etc/openwrt_release      # must match version
 ```
 
-CI owns the full seven-board matrix — build **one** board locally, and use
+CI owns the full multi-board matrix — build **one** board locally, and use
 `apk add` over the feed to check a package rather than reflashing for it.
 
 ## 6. Promote
@@ -181,7 +181,7 @@ Inputs (all optional):
 | Input | Default | Notes |
 |---|---|---|
 | `release_tag` | derived from `version` | `v25.12.6-r3` |
-| `boards` | empty = all seven | a space-separated list for a targeted fix release |
+| `boards` | empty = all boards | a space-separated list for a targeted fix release |
 
 With `boards` set, only those boards rebuild and the manifest merge keeps the
 other boards on their last published version.
@@ -208,7 +208,7 @@ gh api repos/akbar-npj/msm8916-openwrt/contents/firmware.json?ref=gh-pages \
 
 Check, in order:
 
-1. **The tag is not a draft** and carries all seven boards (plus `kmods-*.tar.gz`).
+1. **The tag is not a draft** and carries all boards (plus `kmods-*.tar.gz`).
 2. **The manifest agrees with the asset.** `firmware.json` publishes a `sha256`
    per board; it must equal the hash of the uploaded file:
    ```sh
@@ -267,6 +267,6 @@ manifest lands.
 - [ ] flashed and smoke-tested on the bench
 - [ ] `test` → `staging-main` merged `--no-ff`, `main` fast-forwarded
 - [ ] both branches pushed
-- [ ] CI run green, release not a draft, seven boards + kmods attached
+- [ ] CI run green, release not a draft, all boards + kmods attached
 - [ ] manifest `sha256` matches the uploaded asset
 - [ ] upgrade tested from the previous release on a real device

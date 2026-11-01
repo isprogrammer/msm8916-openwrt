@@ -21,11 +21,11 @@ This project maintains changes in **five** categories. The first three are sourc
 
 ## 1. Patches Overview
 
-### 1.1 Device Tree — board enablement (801–807, 852, 853)
+### 1.1 Device Tree — board enablement (801–807, 852, 853, 867)
 
 | Patch | Targets | Description |
 | :---- | :------ | :---------- |
-| [`801-arm64-dts-qcom-add-devices-makefile.patch`](../../msm89xx/patches/801-arm64-dts-qcom-add-devices-makefile.patch) | `arch/arm64/boot/dts/qcom/Makefile` | Registers all six project DTBs (`hmuf02v5`, `uf02`, `ufi001b`, `ufi003_mb_v02`, `mf800b`, `mifib-v12`) in the kernel build. |
+| [`801-arm64-dts-qcom-add-devices-makefile.patch`](../../msm89xx/patches/801-arm64-dts-qcom-add-devices-makefile.patch) | `arch/arm64/boot/dts/qcom/Makefile` | Registers all project DTBs (`hmuf02v5`, `uf02`, `ufi001b`, `ufi003_mb_v02`, `mf800b`, `mifib-v12`, `uf896`) in the kernel build. |
 | [`802-arm64-dts-qcom-msm8916-label-reserved-memory.patch`](../../msm89xx/patches/802-arm64-dts-qcom-msm8916-label-reserved-memory.patch) | `msm8916.dtsi` | Adds the `reserved_memory:` label so board DTS files can append `ramoops` regions. |
 | [`803-arm64-dts-qcom-uz801-leds-and-button.patch`](../../msm89xx/patches/803-arm64-dts-qcom-uz801-leds-and-button.patch) | `msm8916-yiming-uz801v3.dts` | Gives the UZ801V3 LEDs standard `LED_FUNCTION_WLAN` / `LED_FUNCTION_WAN` roles; preserves the reset button's active-low/pull-up mapping (GPIO23 idles high). |
 | [`804-arm64-dts-qcom-add-msm8916-generic-uf02.patch`](../../msm89xx/patches/804-arm64-dts-qcom-add-msm8916-generic-uf02.patch) | `msm8916-generic-uf02.dts` | Full board DTS for the UF02 stick (buttons, LEDs). |
@@ -34,6 +34,7 @@ This project maintains changes in **five** categories. The first three are sourc
 | [`807-arm64-dts-qcom-add-msm8916-generic-mf800b.patch`](../../msm89xx/patches/807-arm64-dts-qcom-add-msm8916-generic-mf800b.patch) | `msm8916-generic-mf800b.dts` | Full board DTS for the MF800B stick (battery fuel-gauge, bi-colour LEDs, ramoops). |
 | [`852-arm64-dts-qcom-add-msm8916-generic-ufi003.patch`](../../msm89xx/patches/852-arm64-dts-qcom-add-msm8916-generic-ufi003.patch) | `msm8916-generic-ufi003_mb_v02.dts` | Full board DTS for the UFI003_MB_V02 stick (SIM/eSIM GPIO hogs, tri-colour LEDs, reset button, ramoops). |
 | [`853-arm64-dts-qcom-add-msm8916-generic-mifib-v12.patch`](../../msm89xx/patches/853-arm64-dts-qcom-add-msm8916-generic-mifib-v12.patch) | `msm8916-generic-mifib-v12.dts` | Full board DTS for the HM-MIFIB-V12 dongle: 4.2 V battery + PM8916 LBC charger + VM-BMS with pack thermistor, 4-bar battery LEDs, dual-colour WLAN/WAN LEDs, thermal mitigation and the A2 pin. |
+| [`867-arm64-dts-qcom-add-msm8916-generic-uf896.patch`](../../msm89xx/patches/867-arm64-dts-qcom-add-msm8916-generic-uf896.patch) | `msm8916-generic-uf896.dts` | Full board DTS for the UF896 (v1.1) 4G router: ramoops, reset button GPIO 35, tri-colour status LEDs plus six extra indicator LEDs (charger / network / Wi-Fi / data-link). SIM is selected by the modem via `AT+SIMSEL`, **not** an AP GPIO; **no `qcom,a2-pin`** (field-tested — this board does not need the hold). |
 
 ### 1.2 BAM-DMUX network driver (808–812, 814, 820, 821, 825, 828, 831–833, 848, 850)
 
@@ -338,6 +339,30 @@ copies into `target/linux/msm89xx` (and merges `base-files/` into the rootfs). I
   9. **A2 pin**: `&bam_dmux { qcom,a2-pin; }`. The board carries the same HiMI
      V1.0 baseband as HMUF02-V5/UF02/UZ801, so it gets the same modem hold.
 
+#### 867: Generic UF896 (v1.1) Board Device Tree
+- **Target**: `msm8916-generic-uf896.dts`
+- **Compatible**: `"uf896,v1.1", "qcom,msm8916"`
+- **Purpose**: Board DTS for the UF896 v1.1 4G LTE router, built on
+  `msm8916-ufi.dtsi`:
+  1. **Ramoops**: 1 MB at `0x8db00000` (256 KB record / console / pmsg) — the
+     original PR #1 submission omitted it; restored here to match every other
+     board.
+  2. **Reset key**: GPIO 35, **active-low** with pull-up (the UF02 /
+     HMUF02-V5 / UFI001B family wiring).
+  3. **Status LEDs**: `led_r` GPIO 8, `led_g` GPIO 9, `led_b` GPIO 10, all
+     active-high and exposed as `LED_FUNCTION_STATUS`.
+  4. **Extra indicator LEDs** (`leds-extra`): charger blue GPIO 77 / red
+     GPIO 78, network blue GPIO 81 / red GPIO 82, Wi-Fi green GPIO 83 and
+     data-link blue GPIO 84.
+  5. **No SIM GPIO hogs and no A2 pin**: the modem selects the physical SIM
+     with `AT+SIMSEL=0,1,1,1` (userspace, `luci-app-uf896-simsel`), and the
+     board does **not** exhibit the `a2_power.c:1189` quiesce wedge, so it
+     ships without `qcom,a2-pin`.
+- **Board bring-up quirk**: the modem boots into DMS operating mode
+  `factory-test` (RF disabled, cannot register). `etc/init.d/uf896-modem-online`
+  (START=60, ahead of ModemManager at 70) waits for `/dev/wwan0qmi0` and runs
+  `qmicli --dms-set-operating-mode=online`.
+
 ### 2.2 BAM-DMUX network driver
 
 The driver is `drivers/net/wwan/qcom_bam_dmux.c` (all patches in this cluster).
@@ -590,7 +615,7 @@ exposed as the `wcn36xx` cooling device. There is no dedicated WCNSS temperature
 sensor, so — like Android's thermal-engine — the trip is driven from the CPU
 cluster sensor (tsens5 / cpu0-1) at 65 °C; the PMIC trip is at 90 °C. Patch
 861 puts them in `msm8916-ufi.dtsi`, which every board file includes, so all
-seven boards share one copy.
+boards share one copy.
 
 #### 999: TSENS Propagate `-EPROBE_DEFER`
 `tsens_calibrate_nvmem()` reads QFPROM NVMEM cells; if the provider has not yet
@@ -762,7 +787,7 @@ When developing or updating patches:
 2. **Numbering scheme**: three-digit, applied in lexical order. Numbers are
    stable identifiers, not a contiguous sequence — gaps (817, 829, 830, 835–837,
    839, 840) are removed/retired patches and must not be reused casually.
-   - `801–807`, `852–853`: device-tree board enablement
+   - `801–807`, `852–853`, `867`: device-tree board enablement
    - `808–851`: kernel drivers (BAM-DMUX, remoteproc, rpmsg, power, CPR, thermal)
    - `854–859`: power supply & battery (PM8916 LBC charger, VM-BMS, VADC)
    - `999`: trailing bug fixes that must sort last

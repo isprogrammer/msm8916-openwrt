@@ -95,8 +95,8 @@ diag_nv --help
 | `DEVICE_PACKAGES` | [`msm8916.mk`](../../msm89xx/image/msm8916.mk) | per device |
 | `diffconfigs/<board>` | [`diffconfigs/`](../../diffconfigs/) | per board: the `=m` driver feed, option symbols, failsafe tuning, the device line, board-only packages |
 
-Everything identical across the seven boards used to be hand-copied into each
-`diffconfigs/<board>`; it now lives in `DEFAULT_PACKAGES`, so an eighth board
+Everything identical across all boards used to be hand-copied into each
+`diffconfigs/<board>`; it now lives in `DEFAULT_PACKAGES`, so a new board
 gets it automatically. The `=m` entries stay in the diffconfigs on purpose —
 they are external modules and `DEFAULT_PACKAGES` would force them built-in.
 `./build.sh guard` checks both invariants.

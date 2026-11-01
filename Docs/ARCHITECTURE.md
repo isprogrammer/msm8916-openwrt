@@ -93,7 +93,7 @@ one layer silently collides at image-assembly time.
    `TREE_SHA` cannot prove sync, so it also triggers a re-prepare — once.)
 
 The **diffconfig guard** additionally enforces: (a) the `=m` kernel-module
-block is *identical* across all seven boards, and (b) no diffconfig selects a
+block is *identical* across all boards, and (b) no diffconfig selects a
 package already in `DEFAULT_PACKAGES` (in `msm89xx/Makefile`). Divergence is
 rejected before the build starts.
 
