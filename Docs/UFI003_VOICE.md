@@ -65,6 +65,7 @@ Background, the IMS data connection protocol and troubleshooting: [IMS_VOLTE.md]
   `imsdcm`'s table at once. Before, a stale entry made the watchdog believe
   IMS still had its PDN: no re-attach, IMS stayed down and calls fell back
   to 3G.
+* For voice-aware bearer recovery, see [the modem bearer watchdog guide](Modem%20Stability/MODEM_BEARER_WATCHDOG.md).
 
 ## Call control with mmcli
 
