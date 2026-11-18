@@ -1,0 +1,37 @@
+#!/bin/sh
+jz08c_offcharge_preinit() {
+	case " $(cat /proc/cmdline 2>/dev/null) " in
+		*" androidboot.mode=charger "*) ;;
+		*) return 0 ;;
+	esac
+
+	# QUP/SPI, PMIC MPP/GPIO, pwrkey input, charger, BMS and gpio-backlight
+	# are built in; modprobe brings the panel DRM module and its dependencies.
+	modprobe panel-mipi-dbi 2>/dev/null || { reboot -f; return 1; }
+	mdev -s
+	i=0
+	while [ ! -e /dev/fb0 ] && [ "$i" -lt 4 ]; do
+		sleep 1
+		mdev -s
+		i=$((i + 1))
+	done
+	[ -e /dev/fb0 ] || { reboot -f; return 1; }
+
+	[ ! -w /sys/class/graphics/fbcon/cursor_blink ] ||
+		echo 0 > /sys/class/graphics/fbcon/cursor_blink
+	for vt in /sys/class/vtconsole/vtcon*; do
+		[ -r "$vt/name" ] || continue
+		case "$(cat "$vt/name" 2>/dev/null)" in
+			*"frame buffer"*)
+				[ ! -w "$vt/bind" ] || echo 0 > "$vt/bind"
+				;;
+		esac
+	done
+
+	/usr/sbin/jz08c-power-ui --charge
+	rc=$?
+	# Success means KEY_POWER: return to normal preinit. Failure fallback reboots.
+	[ "$rc" -eq 0 ] && return 0
+	reboot -f
+}
+boot_hook_add preinit_main jz08c_offcharge_preinit
