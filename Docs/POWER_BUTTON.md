@@ -1,11 +1,12 @@
 # The power button
 
-Only **two** boards in this project have a power button:
+Three boards in this project have a power button:
 
 | Board | Power key | Reset button |
 | :---- | :-------- | :----------- |
 | `mifib-v12` | `pm8941_pwrkey` (PMIC PON) | GPIO 102, also the recovery key |
 | `mf800b` | `pm8941_pwrkey` (PMIC PON) | GPIO 102, also the recovery key |
+| `jz08c-v51` | `pm8941_pwrkey` (PMIC PON) | — |
 | `hmuf02v5`, `uf02`, `ufi001b`, `ufi003`, `uz801` | none | GPIO 37 / GPIO 23 — plain reset, no power key |
 
 On the buttonless boards `pwrkey-monitor` is not started and the handler is
@@ -17,9 +18,9 @@ never invoked; nothing else changes.
 
 | Press | Result |
 | :---- | :----- |
-| short press (≤ 2 s) | nothing — anti-accidental |
+| short press (≤ 2 s) | JZ08C: toggle LCD; other boards: nothing |
 | **two** short presses within 800 ms | clean `sync; reboot` |
-| hold ≥ 4 s, on battery | LED blinks 6×, then `poweroff` |
+| hold ≥ 4 s, on battery | JZ08C: poweroff splash; other boards: LED blinks 6×, then `poweroff` |
 | hold ≥ 4 s, on VBUS | clean `sync; reboot` (see below) |
 | hold ≥ ~10–15 s | the PMIC hard-resets on its own — software cannot prevent it |
 
@@ -43,8 +44,8 @@ pm8941_pwrkey  (evdev, /dev/input/eventN)
         ▼
 /etc/rc.button/power            ACTION=released SEEN=<seconds> BUTTON=power
         │
-        ├─ SEEN ≤ 2  → double-press window (800 ms) → reboot
-        ├─ SEEN ≥ 4  → VBUS? reboot : blink + poweroff
+        ├─ SEEN ≤ 2  → first short: JZ08C LCD toggle; second within 800 ms: reboot
+        ├─ SEEN ≥ 4  → VBUS? reboot : JZ08C splash / other-board LED blink + poweroff
         └─ otherwise → nothing
 ```
 
@@ -79,9 +80,10 @@ Thresholds are constants at the top of
 Keep `LONG_HOLD` below ~10 s: past that the PMIC resets the board itself and
 the script never sees the release.
 
-The LED used for the goodbye blink is the first existing of `red:wan`,
-`green:wan`, `red:bat`, `green:bat`, `green:wlan` — so the same script works on
-both button boards without a board check.
+On JZ08C, the off-charge package marker enables the LCD toggle and poweroff
+splash; it is absent on other boards. Other power-button boards retain the LED
+goodbye blink, using the first existing of red:wan, green:wan, red:bat,
+green:bat, or green:wlan.
 
 ---
 
