@@ -1,0 +1,9 @@
+From: isp <40058476+isprogrammer@users.noreply.github.com>
+Subject: [PATCH] drm/panel: add JZ08C ST7735S MIPI DBI compatible
+
+--- a/Documentation/devicetree/bindings/display/panel/panel-mipi-dbi-spi.yaml
++++ b/Documentation/devicetree/bindings/display/panel/panel-mipi-dbi-spi.yaml
+@@ -77,2 +77,3 @@
+           - shineworld,lh133k
++          - sitronix,st7735s-jz08c-v51
+       - const: panel-mipi-dbi-spi

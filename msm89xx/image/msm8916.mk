@@ -239,7 +239,7 @@ define Device/generic-jz08c-v51
 	DEVICE_PACKAGES := msm89xx-scripts wpad-basic-wolfssl rmtfs uci-usb-gadget \
 		block-mount f2fs-tools tar \
 		msm-firmware-dumper reboot-edl qcom-carrier-autocfg \
-		diag-efs diag-logtool msm89xx-firmware-upgrade luci-app-update-notify
+		diag-efs diag-logtool msm89xx-firmware-upgrade luci-app-update-notify kmod-drm-panel-mipi-dbi jz08c-st7735s-firmware
 	DEVICE_PACKAGES += luci-app-battery
 endef
 TARGET_DEVICES += generic-jz08c-v51

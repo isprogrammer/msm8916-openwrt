@@ -3,11 +3,11 @@ Subject: [PATCH] arm64: dts: qcom: Add experimental JZ08C V51
 
 Add an experimental JZ08C V51 profile. The stock board has 512 MiB RAM,
 78 MiB MPSS reservation, PM8916 PON keys, SIM-control gpio-led wrappers,
-and disabled SDC2. The unidentified SPI LCD is left disabled.
+and disabled SDC2. The ST7735S panel uses the generic MIPI DBI SPI driver.
 
 --- /dev/null
 +++ b/arch/arm64/boot/dts/qcom/msm8916-generic-jz08c-v51.dts
-@@ -0,0 +1,210 @@
+@@ -0,0 +1,245 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +
 +/dts-v1/;
@@ -165,19 +165,54 @@ and disabled SDC2. The unidentified SPI LCD is left disabled.
 +	pins = "gpio1", "gpio20", "gpio22", "gpio23";
 +};
 +
-+/* QUP4 is the observed stock SPI controller; panel remains disabled until a
-+ * supported controller/initialization sequence is available in this kernel. */
++/* Stock panel logic rail is L6 at 1.8 V; panel supply is L17 at 2.85 V. */
++&pm8916_rpm_regulators {
++	pm8916_l17: l17 {
++		regulator-min-microvolt = <2850000>;
++		regulator-max-microvolt = <2850000>;
++	};
++};
++
++/* Stock MPP4 is configured as a 40 mA current sink and stays enabled. */
++&pm8916_mpps {
++	jz08c_lcd_bl: lcd-bl-state {
++		pins = "mpp4";
++		function = "sink";
++		drive-strength = <40>;
++		output-high;
++	};
++};
++
++/* QUP4 and TLMM pins are from the live stock inspection. */
 +&blsp_spi4 {
++        cs-gpios = <&tlmm 14 GPIO_ACTIVE_LOW>;
 +	status = "okay";
 +	panel@0 {
-+		compatible = "sitronix,st7735r";
++		compatible = "sitronix,st7735s-jz08c-v51", "panel-mipi-dbi-spi";
 +		reg = <0>;
 +		spi-max-frequency = <16000000>;
-+		width = <128>;
-+		height = <128>;
-+		reset-gpios = <&tlmm 118 GPIO_ACTIVE_HIGH>;
++		/* Estimated active dimensions for the stock 1.44-inch WX144 module. */
++		width-mm = <26>;
++		height-mm = <26>;
 +		dc-gpios = <&tlmm 116 GPIO_ACTIVE_HIGH>;
-+		status = "disabled";
++		reset-gpios = <&tlmm 118 GPIO_ACTIVE_HIGH>;
++		power-supply = <&pm8916_l17>;
++		io-supply = <&pm8916_l6>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&jz08c_lcd_bl>;
++		write-only;
++		format = "r5g6b5";
++		panel-timing {
++			clock-frequency = <0>;
++			hactive = <128>;
++			vactive = <128>;
++			hfront-porch = <0>;
++			hback-porch = <2>;
++			hsync-len = <0>;
++			vfront-porch = <0>;
++			vback-porch = <3>;
++			vsync-len = <0>;
++		};
 +	};
 +};
 +
