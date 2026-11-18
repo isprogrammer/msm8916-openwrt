@@ -183,6 +183,15 @@ and disabled SDC2. The ST7735S panel uses the generic MIPI DBI SPI driver.
 +	};
 +};
 +
++/* GPIO backlight toggles MPP4's sink enable while retaining its 40 mA setup. */
++jz08c_lcd_backlight: jz08c-lcd-backlight {
++	compatible = "gpio-backlight";
++	gpios = <&pm8916_mpps 4 GPIO_ACTIVE_HIGH>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&jz08c_lcd_bl>;
++	default-on;
++};
++
 +/* QUP4 and TLMM pins are from the live stock inspection. */
 +&blsp_spi4 {
 +	/delete-property/ dmas;
@@ -202,6 +211,7 @@ and disabled SDC2. The ST7735S panel uses the generic MIPI DBI SPI driver.
 +		io-supply = <&pm8916_l6>;
 +		pinctrl-names = "default";
 +		pinctrl-0 = <&jz08c_lcd_bl>;
++		backlight = <&jz08c_lcd_backlight>;
 +		write-only;
 +		format = "r5g6b5";
 +		panel-timing {
