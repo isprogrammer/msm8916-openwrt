@@ -1,0 +1,220 @@
+From: OpenWrt MSM8916 Maintainers
+Subject: [PATCH] arm64: dts: qcom: Add experimental JZ08C V51
+
+Add an experimental JZ08C V51 profile. The stock board has 512 MiB RAM,
+78 MiB MPSS reservation, PM8916 PON keys, SIM-control gpio-led wrappers,
+and disabled SDC2. The unidentified SPI LCD is left disabled.
+
+--- /dev/null
++++ b/arch/arm64/boot/dts/qcom/msm8916-generic-jz08c-v51.dts
+@@ -0,0 +1,210 @@
++// SPDX-License-Identifier: GPL-2.0-only
++
++/dts-v1/;
++
++#include "msm8916-ufi.dtsi"
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/input/input.h>
++
++/ {
++	model = "JZ08C V51 experimental 4G device";
++	compatible = "jz08c-v51,generic", "qcom,msm8916";
++
++	/*
++	 * The owner label is 2100 mAh / 4.35 V. The requested 4.20 V
++	 * limit is intentionally conservative. Stock characterizes a different
++	 * 1500 mAh profile; its OCV curve is the only available voltage/SOC
++	 * reference and is therefore provisional for this experimental node.
++	 */
++	battery: battery {
++		compatible = "simple-battery";
++		device-chemistry = "lithium-ion";
++
++		charge-full-design-microamp-hours = <2100000>;
++		voltage-max-design-microvolt = <4200000>;
++		voltage-min-design-microvolt = <3400000>;
++		constant-charge-current-max-microamp = <1000000>;
++		constant-charge-voltage-max-microvolt = <4200000>;
++		charge-term-current-microamp = <100000>;
++		factory-internal-resistance-micro-ohms = <210000>;
++
++		/* Stock qcom,pc-temp-ocv-lut in mV, converted to uV; 31 points. */
++		ocv-capacity-celsius = <(-20) 0 25 40 60>;
++
++		/* -20 C */
++		ocv-capacity-table-0 =
++			<4175000 100>, <4097000 95>, <4039000 90>, <3963000 85>,
++			<3920000 80>, <3887000 75>, <3856000 70>, <3830000 65>,
++			<3808000 60>, <3793000 55>, <3779000 50>, <3768000 45>,
++			<3757000 40>, <3746000 35>, <3734000 30>, <3722000 25>,
++			<3707000 20>, <3693000 16>, <3678000 13>, <3664000 11>,
++			<3656000 10>, <3646000 9>, <3634000 8>, <3618000 7>,
++			<3599000 6>, <3573000 5>, <3541000 4>, <3496000 3>,
++			<3428000 2>, <3312000 1>, <3000000 0>;
++
++		/* 0 C */
++		ocv-capacity-table-1 =
++			<4173000 100>, <4111000 95>, <4075000 90>, <4017000 85>,
++			<3969000 80>, <3932000 75>, <3898000 70>, <3868000 65>,
++			<3843000 60>, <3821000 55>, <3803000 50>, <3788000 45>,
++			<3779000 40>, <3771000 35>, <3762000 30>, <3747000 25>,
++			<3721000 20>, <3705000 16>, <3698000 13>, <3693000 11>,
++			<3690000 10>, <3687000 9>, <3683000 8>, <3677000 7>,
++			<3667000 6>, <3645000 5>, <3607000 4>, <3550000 3>,
++			<3469000 2>, <3342000 1>, <3000000 0>;
++
++		/* 25 C */
++		ocv-capacity-table-2 =
++			<4167000 100>, <4112000 95>, <4072000 90>, <4025000 85>,
++			<3984000 80>, <3957000 75>, <3929000 70>, <3900000 65>,
++			<3858000 60>, <3827000 55>, <3807000 50>, <3792000 45>,
++			<3780000 40>, <3772000 35>, <3765000 30>, <3753000 25>,
++			<3731000 20>, <3704000 16>, <3687000 13>, <3683000 11>,
++			<3682000 10>, <3681000 9>, <3680000 8>, <3676000 7>,
++			<3667000 6>, <3638000 5>, <3591000 4>, <3528000 3>,
++			<3445000 2>, <3308000 1>, <3000000 0>;
++
++		/* 40 C */
++		ocv-capacity-table-3 =
++			<4162000 100>, <4110000 95>, <4068000 90>, <4026000 85>,
++			<3989000 80>, <3958000 75>, <3928000 70>, <3901000 65>,
++			<3863000 60>, <3827000 55>, <3808000 50>, <3793000 45>,
++			<3780000 40>, <3768000 35>, <3759000 30>, <3744000 25>,
++			<3722000 20>, <3696000 16>, <3678000 13>, <3676000 11>,
++			<3675000 10>, <3674000 9>, <3672000 8>, <3668000 7>,
++			<3655000 6>, <3623000 5>, <3575000 4>, <3511000 3>,
++			<3423000 2>, <3280000 1>, <3000000 0>;
++
++		/* 60 C */
++		ocv-capacity-table-4 =
++			<4157000 100>, <4107000 95>, <4064000 90>, <4025000 85>,
++			<3988000 80>, <3955000 75>, <3925000 70>, <3898000 65>,
++			<3862000 60>, <3827000 55>, <3807000 50>, <3792000 45>,
++			<3779000 40>, <3768000 35>, <3749000 30>, <3730000 25>,
++			<3709000 20>, <3683000 16>, <3667000 13>, <3665000 11>,
++			<3664000 10>, <3662000 9>, <3661000 8>, <3656000 7>,
++			<3639000 6>, <3603000 5>, <3554000 4>, <3490000 3>,
++			<3400000 2>, <3250000 1>, <3000000 0>;
++
++	};
++};
++
++/* The 512 MiB stock DT reserves 78 MiB for MPSS from 0x86800000. */
++&mpss_mem {
++	reg = <0x0 0x86800000 0x0 0x04e00000>;
++	status = "okay";
++};
++
++/* Keep the shared ramoops region used by this board family. */
++&reserved_memory {
++	ramoops@8db00000 {
++		compatible = "ramoops";
++		reg = <0x0 0x8db00000 0x0 0x00100000>;
++		record-size = <0x00040000>;
++		console-size = <0x00040000>;
++		pmsg-size = <0x00040000>;
++		ecc-size = <16>;
++	};
++};
++
++/* Stock qpnp_pon reports RESIN_N as KEY_F1; Linux exposes reset as KEY_RESTART. */
++&pm8916_resin {
++	linux,code = <KEY_RESTART>;
++	status = "okay";
++};
++
++/* Stock PM8916 PON already supplies KPDPWR_N as KEY_POWER. */
++
++/* These stock gpio-leds entries are SIM controls, not indicator LEDs. */
++&{/leds} {
++	/delete-node/ led-r;
++	/delete-node/ led-g;
++	/delete-node/ led-b;
++
++	sim1-switch-gpio {
++		label = "sim1_switch_gpio";
++		gpios = <&tlmm 22 GPIO_ACTIVE_HIGH>;
++		linux,default-trigger = "none";
++		default-state = "off";
++		retain-state-suspended;
++	};
++	sim2-switch-gpio {
++		label = "sim2_switch_gpio";
++		gpios = <&tlmm 23 GPIO_ACTIVE_HIGH>;
++		linux,default-trigger = "none";
++		default-state = "off";
++		retain-state-suspended;
++	};
++	sim3-switch-gpio {
++		label = "sim3_switch_gpio";
++		gpios = <&tlmm 1 GPIO_ACTIVE_HIGH>;
++		linux,default-trigger = "none";
++		default-state = "on";
++		retain-state-suspended;
++	};
++	sim-hotdet-gpio {
++		label = "sim_hotdet_gpio";
++		gpios = <&tlmm 20 GPIO_ACTIVE_HIGH>;
++		linux,default-trigger = "none";
++		default-state = "off";
++		retain-state-suspended;
++	};
++};
++
++&gpio_leds_default {
++	pins = "gpio1", "gpio20", "gpio22", "gpio23";
++};
++
++/* QUP4 is the observed stock SPI controller; panel remains disabled until a
++ * supported controller/initialization sequence is available in this kernel. */
++&blsp_spi4 {
++	status = "okay";
++	panel@0 {
++		compatible = "sitronix,st7735r";
++		reg = <0>;
++		spi-max-frequency = <16000000>;
++		width = <128>;
++		height = <128>;
++		reset-gpios = <&tlmm 118 GPIO_ACTIVE_HIGH>;
++		dc-gpios = <&tlmm 116 GPIO_ACTIVE_HIGH>;
++		status = "disabled";
++	};
++};
++
++/* Stock SDC2 is 4-bit and disabled; retain its stock rails and pinctrl. */
++&sdhc_2 {
++	status = "disabled";
++	bus-width = <4>;
++	broken-cd;
++	max-frequency = <200000000>;
++	vmmc-supply = <&pm8916_l11>;
++	vqmmc-supply = <&pm8916_l12>;
++};
++
++/* The PMIC charger and voltage-mode BMS consume the simple-battery data. */
++&pm8916_charger {
++	monitored-battery = <&battery>;
++	qcom,fast-charge-safe-voltage = <4200000>;
++	qcom,fast-charge-safe-current = <1000000>;
++	status = "okay";
++};
++
++&pm8916_bms {
++	monitored-battery = <&battery>;
++	power-supplies = <&pm8916_charger>;
++	/* Measured fixed 45 kΩ third lead is treated as battery ID, not NTC. */
++	status = "okay";
++};
++
++&pm8916_usbin {
++	status = "disabled";
++};
++
++&usb {
++	dr_mode = "peripheral";
++	extcon = <&pm8916_charger>;
++};
++
++&usb_hs_phy {
++	extcon = <&pm8916_charger>;
++};

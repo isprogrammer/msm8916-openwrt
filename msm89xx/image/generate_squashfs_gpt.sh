@@ -64,7 +64,7 @@ fi
 
 truncate -s $((TOT_SECTORS * 512)) "${IMG}"
 
-sfdisk "${IMG}" <<EOF
+	sfdisk "${IMG}" <<EOF
 label: gpt
 label-id: DB708ACF-2E04-8DE2-BAFE-30C9B26444C5
 unit: sectors
