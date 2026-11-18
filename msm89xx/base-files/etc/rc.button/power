@@ -8,7 +8,7 @@
 #
 # Behaviour (kept clear of the PMIC own ~10-15 s hard-reset, which
 # power-cycles the board regardless of software):
-#   * short press              -> nothing (anti-accidental)
+#   * short press              -> JZ08C LCD toggle; otherwise nothing
 #   * two short presses        -> reboot      (within DBL_WINDOW ms)
 #   * long press (>= LONG_HOLD s, released) -> power off (shutdown)
 #                                              -> reboot when running on
@@ -24,6 +24,17 @@ SHORT_MAX=2
 LONG_HOLD=4
 DBL_WINDOW=800
 STATE=/var/run/powerbtn.dbl
+
+LCD_BRIGHTNESS=/sys/class/backlight/jz08c-lcd-backlight/brightness
+
+lcd_toggle() {
+    [ -e /usr/share/jz08c-offcharge/jz08c-board ] || return 0
+    [ -r "$LCD_BRIGHTNESS" ] && [ -w "$LCD_BRIGHTNESS" ] || return 0
+    case "$(cat "$LCD_BRIGHTNESS" 2>/dev/null)" in
+        0) echo 1 > "$LCD_BRIGHTNESS" ;;
+        *) echo 0 > "$LCD_BRIGHTNESS" ;;
+    esac
+}
 
 # Is the board running from an external supply?
 #
@@ -68,6 +79,8 @@ if [ "$SEEN" -le "$SHORT_MAX" ] 2>/dev/null; then
         fi
     fi
     echo "$now_ms" > "$STATE"
+    # JZ08C only: toggle on the first short press; package marker gates it.
+    lcd_toggle
     exit 0
 elif [ "$SEEN" -ge "$LONG_HOLD" ] 2>/dev/null; then
     rm -f "$STATE"
@@ -81,17 +94,22 @@ elif [ "$SEEN" -ge "$LONG_HOLD" ] 2>/dev/null; then
 
     logger -t power-button "Power button held ${SEEN}s: powering off"
 
-    max=$(cat "$LED/max_brightness" 2>/dev/null)
-    [ -n "$max" ] || max=1
-    echo none > "$LED/trigger" 2>/dev/null
-    i=0
-    while [ "$i" -lt 6 ]; do
-        echo "$max" > "$LED/brightness" 2>/dev/null
-        usleep 120000
-        echo 0 > "$LED/brightness" 2>/dev/null
-        usleep 120000
-        i=$((i + 1))
-    done
+    # JZ08C package installs this helper; other boards keep existing behavior.
+    if [ -x /usr/sbin/jz08c-power-ui ]; then
+        /usr/sbin/jz08c-power-ui --poweroff
+    else
+        max=$(cat "$LED/max_brightness" 2>/dev/null)
+        [ -n "$max" ] || max=1
+        echo none > "$LED/trigger" 2>/dev/null
+        i=0
+        while [ "$i" -lt 6 ]; do
+            echo "$max" > "$LED/brightness" 2>/dev/null
+            usleep 120000
+            echo 0 > "$LED/brightness" 2>/dev/null
+            usleep 120000
+            i=$((i + 1))
+        done
+    fi
 
     exec /sbin/poweroff
 else
