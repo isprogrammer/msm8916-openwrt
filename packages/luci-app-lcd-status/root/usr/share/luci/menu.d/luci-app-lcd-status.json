@@ -1,0 +1,15 @@
+{
+	"admin/services/lcd-status": {
+		"title": "LCD Status",
+		"order": 90,
+		"action": {
+			"type": "view",
+			"path": "lcd-status"
+		},
+		"depends": {
+			"acl": [
+				"luci-app-lcd-status"
+			]
+		}
+	}
+}

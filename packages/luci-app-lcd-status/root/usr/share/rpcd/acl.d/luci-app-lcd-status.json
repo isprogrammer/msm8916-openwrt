@@ -1,0 +1,7 @@
+{
+	"luci-app-lcd-status": {
+		"description": "Manage LCD status display settings",
+		"read": { "uci": [ "lcdstatus" ] },
+		"write": { "uci": [ "lcdstatus" ] }
+	}
+}
