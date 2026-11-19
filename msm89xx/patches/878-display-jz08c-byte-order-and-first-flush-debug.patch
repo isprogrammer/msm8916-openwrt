@@ -1,0 +1,39 @@
+From: Codex <codex@users.noreply.github.com>
+Subject: [PATCH] drm/tiny: force JZ08C RGB565 byte order and trace initial flushes
+
+The JZ08C ST7735S panel needs the RGB565 bytes swapped and sent as 8-bit
+words. Keep the quirk scoped to its panel compatible. Log only the first
+20 framebuffer flushes to aid bring-up without unbounded console output.
+
+---
+ drivers/gpu/drm/tiny/panel-mipi-dbi.c |  6 ++++++
+ drivers/gpu/drm/drm_mipi_dbi.c        | 10 ++++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/drivers/gpu/drm/tiny/panel-mipi-dbi.c b/drivers/gpu/drm/tiny/panel-mipi-dbi.c
+--- a/drivers/gpu/drm/tiny/panel-mipi-dbi.c
++++ b/drivers/gpu/drm/tiny/panel-mipi-dbi.c
+@@ -13,0 +14 @@
++#include <linux/of.h>
+@@ -365,0 +366,5 @@ static int panel_mipi_dbi_spi_probe(struct spi_device *spi)
++
++	if (of_device_is_compatible(dev->of_node, "sitronix,st7735s-jz08c-v51")) {
++		dbi->write_memory_bpw = 8;
++		dbi->swap_bytes = true;
++	}
+diff --git a/drivers/gpu/drm/drm_mipi_dbi.c b/drivers/gpu/drm/drm_mipi_dbi.c
+--- a/drivers/gpu/drm/drm_mipi_dbi.c
++++ b/drivers/gpu/drm/drm_mipi_dbi.c
+@@ -271,0 +272 @@ static void mipi_dbi_fb_dirty(struct iosys_map *src, struct drm_framebuffer *fb,
++	static unsigned int flush_debug_count;
+@@ -303,0 +305,9 @@ static void mipi_dbi_fb_dirty(struct iosys_map *src, struct drm_framebuffer *fb,
++
++	if (flush_debug_count < 20) {
++		dev_info(&dbidev->dbi.spi->dev,
++			 "flush %u rect=(%u,%u)-(%u,%u) len=%zu swap_bytes=%u\n",
++			 flush_debug_count + 1, rect->x1, rect->y1, rect->x2, rect->y2,
++			 len, swap);
++		flush_debug_count++;
++	}
++
+*** End Patch
