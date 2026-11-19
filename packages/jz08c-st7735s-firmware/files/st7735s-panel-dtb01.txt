@@ -16,7 +16,7 @@
 				qcom,mdss-spi-v-top-border = <0x00>;
 				qcom,mdss-spi-v-bottom-border = <0x00>;
 				qcom,mdss-spi-bpp = <0x10>;
-				qcom,mdss-spi-on-command = [78 01 11 00 04 b1 05 3a 3a 00 04 b2 05 3a 3a 00 07 b3 05 3a 3a 05 3a 3a 00 02 b4 03 00 04 c0 62 02 04 00 02 c1 c0 00 03 c2 0d 00 00 03 c3 8d 6a 00 03 c4 8d ee 00 02 c5 12 00 11 e0 03 1b 12 11 3f 3a 32 34 2f 2b 30 3a 00 01 02 05 00 11 e1 03 1b 12 11 32 2f 2a 2f 2e 2c 35 3f 00 00 01 05 00 02 36 c8 00 02 3a 05 00 05 2a 00 02 00 81 00 05 2b 00 03 00 82 00 01 29 00 01 2c];
+				qcom,mdss-spi-on-command = [78 01 11 00 04 b1 05 3a 3a 00 04 b2 05 3a 3a 00 07 b3 05 3a 3a 05 3a 3a 00 02 b4 03 00 04 c0 62 02 04 00 02 c1 c0 00 03 c2 0d 00 00 03 c3 8d 6a 00 03 c4 8d ee 00 02 c5 12 00 11 e0 03 1b 12 11 3f 3a 32 34 2f 2b 30 3a 00 01 02 05 00 11 e1 03 1b 12 11 32 2f 2a 2f 2e 2c 35 3f 00 00 01 05 00 02 36 c8 00 02 3a 05 00 05 2a 00 02 00 81 00 05 2b 00 03 00 82 00 01 29 14 02 36 e8 14 02 36 c8 00 01 2c];
 				qcom,mdss-spi-off-command = [00 01 28 78 01 10];
 				qcom,mdss-spi-bl-min-level = <0x01>;
 				qcom,mdss-spi-bl-max-level = <0xff>;

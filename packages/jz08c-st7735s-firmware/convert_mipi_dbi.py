@@ -29,7 +29,7 @@ while i < len(raw):
     if delay_ms:
         records.extend((0x00, 0x01, delay_ms))
     count += 1
-if count != 19:
-    raise SystemExit(f"expected 19 stock commands, got {count}")
+if count != 21:
+    raise SystemExit(f"expected 21 stock commands, got {count}")
 pathlib.Path(sys.argv[2]).write_bytes(b"MIPI DBI" + b"\0" * 7 + b"\x01" + records)
 print(f"converted {count} stock commands to {len(records)} command bytes")
