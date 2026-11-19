@@ -7,7 +7,7 @@ and disabled SDC2. The ST7735S panel uses the generic MIPI DBI SPI driver.
 
 --- /dev/null
 +++ b/arch/arm64/boot/dts/qcom/msm8916-generic-jz08c-v51.dts
-@@ -0,0 +1,259 @@
+@@ -0,0 +1,257 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +
 +/dts-v1/;
@@ -211,8 +211,6 @@ and disabled SDC2. The ST7735S panel uses the generic MIPI DBI SPI driver.
 +		reset-gpios = <&tlmm 118 GPIO_ACTIVE_HIGH>;
 +		power-supply = <&pm8916_l17>;
 +		io-supply = <&pm8916_l6>;
-+		pinctrl-names = "default";
-+		pinctrl-0 = <&jz08c_lcd_bl>;
 +		backlight = <&jz08c_lcd_backlight>;
 +		write-only;
 +		format = "r5g6b5";
