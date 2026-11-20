@@ -36,3 +36,5 @@ config line
 
 Custom command output is trimmed to the display width and the command has a
 2.5 second timeout. Treat configured commands as trusted root commands.
+
+The init service reapplies the orientation sequence after unbinding fbcon on start and after rebinding fbcon on stop, because either transition can reset the panel.

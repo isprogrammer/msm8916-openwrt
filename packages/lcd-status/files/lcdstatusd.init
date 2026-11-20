@@ -22,11 +22,16 @@ rebind_fbcon() {
 	done
 }
 
+apply_panel_orientation() {
+	# A return value of 1 from the panel debugfs command is normal.
+	/usr/sbin/lcdstatusd --orientation-only >/dev/null 2>&1 || logger -t lcdstatusd "panel orientation sequence reported an error"
+}
+
 start_service() {
 	unbind_fbcon
 	# The panel orientation command sequence must run on every boot, even if
 	# lcdstatus itself is disabled. A return value of 1 from debugfs is normal.
-	/usr/sbin/lcdstatusd --orientation-only >/dev/null 2>&1 || logger -t lcdstatusd "panel orientation sequence reported an error"
+	apply_panel_orientation
 	[ "$(uci -q get lcdstatus.main.enabled)" = "1" ] || return 0
 	procd_open_instance
 	procd_set_param command /usr/sbin/lcdstatusd
@@ -39,4 +44,6 @@ start_service() {
 
 stop_service() {
 	rebind_fbcon
+	# fbcon can reset the panel orientation when it binds again.
+	apply_panel_orientation
 }
