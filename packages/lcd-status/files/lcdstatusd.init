@@ -60,8 +60,14 @@ start_service() {
 	procd_close_instance
 }
 stop_service() {
+	# rc.common calls this before procd_kill; defer fbcon work until
+	# service_stopped, which runs after procd has removed the daemon.
+	:
+}
+
+service_stopped() {
+	while pidof lcdstatusd >/dev/null 2>&1; do sleep 1; done
 	rebind_fbcon
-	# fbcon can reset the panel orientation when it binds again. The daemon
-	# has exited before this hook runs.
+	# fbcon can reset the panel orientation when it binds again.
 	apply_panel_orientation_shell
 }

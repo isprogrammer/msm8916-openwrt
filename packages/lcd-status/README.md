@@ -27,9 +27,9 @@ forwards daemon stdout/stderr to the system log.
 
 When LCD rendering is disabled in UCI, fbcon stays bound and the init script
 runs a one-shot shell orientation sequence at boot, preserving the current
-framebuffer image when it can read a complete frame. On stop, after the daemon
-has exited and fbcon is rebound, the init script runs that same shell sequence
-again because rebinding can reset panel orientation.
+framebuffer image when it can read a complete frame. After procd removes the
+daemon and its process exits, the service-stopped hook rebinds fbcon and runs
+the shell sequence again because rebinding can reset panel orientation.
 
 Example line:
 
@@ -42,5 +42,3 @@ config line
 
 Custom command output is trimmed to the display width and the command has a
 2.5 second timeout. Treat configured commands as trusted root commands.
-
-The init service reapplies the orientation sequence after unbinding fbcon on start and after rebinding fbcon on stop, because either transition can reset the panel.
