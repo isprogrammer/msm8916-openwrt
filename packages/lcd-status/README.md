@@ -18,12 +18,18 @@ after that many seconds without a power-key press. The shared power-button
 handler writes an activity marker and its default short press toggles the LCD,
 so a press wakes an automatically blanked panel and resets the timer.
 
-At service startup the init script unbinds fbcon and invokes the daemon's
-`--orientation-only` mode even if LCD rendering is disabled. It writes the
-panel's ASCII DCS sequence `36 E8`, a full framebuffer frame, `36 C8`, then a
-second full frame. The panel debugfs command may return `1` even when the
-command is accepted. Normal daemon runs also apply orientation unless init
-has already done so. Logs are forwarded to system log by procd stdout/stderr.
+When LCD rendering is enabled, the init script unbinds fbcon and starts
+lcdstatusd. Before its refresh loop, the daemon renders the configured initial
+frame and writes the panel's ASCII DCS sequence 36 E8, a full frame, 36 C8,
+then a second full frame. It logs command or frame errors and continues; this
+panel's debugfs command can report a nonzero status even when accepted. Procd
+forwards daemon stdout/stderr to the system log.
+
+When LCD rendering is disabled in UCI, fbcon stays bound and the init script
+runs a one-shot shell orientation sequence at boot, preserving the current
+framebuffer image when it can read a complete frame. On stop, after the daemon
+has exited and fbcon is rebound, the init script runs that same shell sequence
+again because rebinding can reset panel orientation.
 
 Example line:
 

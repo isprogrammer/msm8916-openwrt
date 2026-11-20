@@ -586,7 +586,9 @@ static int run(const char *fbpath, int test_mode, int orientation_only)
 	scale = s.font_scale;
 	if (!test_mode) {
 		backlight_set(s.backlight);
-		if (!getenv("LCDSTATUS_ORIENTATION_DONE") && panel_orientation(fd, frame, bytes) < 0)
+		/* Show the configured initial frame in both panel address modes. */
+		render(frame, w, h, stride, &s);
+		if (panel_orientation(fd, frame, bytes) < 0)
 			fprintf(stderr, "lcdstatusd: panel orientation sequence reported an error\n");
 	}
 	if (orientation_only) { free(frame); close(fd); return result; }
