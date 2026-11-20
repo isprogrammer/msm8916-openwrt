@@ -240,7 +240,7 @@ define Device/generic-jz08c-v51
 		block-mount f2fs-tools tar \
 		msm-firmware-dumper reboot-edl qcom-carrier-autocfg \
 		diag-efs diag-logtool msm89xx-firmware-upgrade luci-app-update-notify kmod-drm-panel-mipi-dbi jz08c-st7735s-firmware
-	DEVICE_PACKAGES += luci-app-battery jz08c-offcharge
+	DEVICE_PACKAGES += luci-app-battery jz08c-offcharge lcd-status luci-app-lcd-status
 endef
 TARGET_DEVICES += generic-jz08c-v51
 
