@@ -6,6 +6,7 @@ config global 'main'
 	option bg '000000'
 	option font_scale '1'
 	option backlight_brightness '-1'
+	option auto_off_s '0'
 
 config line
 	option label 'TIME'
@@ -25,4 +26,9 @@ config line
 config line
 	option label 'LOAD'
 	option source 'cpu_load'
+	option color 'FFFFFF'
+
+config line
+	option label 'POWER'
+	option source 'power_source'
 	option color 'FFFFFF'

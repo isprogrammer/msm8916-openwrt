@@ -35,7 +35,7 @@ struct lcd_line {
 	char exec_cmd[MAX_TEXT];
 };
 struct settings {
-	int enabled, refresh_s, rotation, font_scale, backlight;
+	int enabled, refresh_s, rotation, font_scale, backlight, auto_off_s;
 	char fg[16], bg[16];
 	struct lcd_line lines[MAX_LINES];
 	size_t nlines;
@@ -87,6 +87,7 @@ static void setting_value(struct settings *s, const char *section,
 		else if (!strcmp(key, "rotation")) s->rotation = atoi(value);
 		else if (!strcmp(key, "font_scale")) s->font_scale = atoi(value);
 		else if (!strcmp(key, "backlight_brightness")) s->backlight = atoi(value);
+		else if (!strcmp(key, "auto_off_s")) s->auto_off_s = atoi(value);
 		else if (!strcmp(key, "fg")) snprintf(s->fg, sizeof(s->fg), "%s", value);
 		else if (!strcmp(key, "bg")) snprintf(s->bg, sizeof(s->bg), "%s", value);
 	} else if (!strcmp(section, "line") && s->nlines) {
@@ -102,7 +103,7 @@ static void defaults(struct settings *s)
 {
 	memset(s, 0, sizeof(*s));
 	s->enabled = 1; s->refresh_s = 5; s->font_scale = 1;
-	s->backlight = -1;
+	s->backlight = -1; s->auto_off_s = 0;
 	strcpy(s->fg, "FFFFFF"); strcpy(s->bg, "000000");
 }
 
@@ -132,6 +133,8 @@ static int load_settings(struct settings *s, const char *path)
 	fclose(f);
 	if (s->refresh_s < 1) s->refresh_s = 1;
 	if (s->refresh_s > 3600) s->refresh_s = 3600;
+	if (s->auto_off_s < 0) s->auto_off_s = 0;
+	if (s->auto_off_s > 86400) s->auto_off_s = 86400;
 	if (s->font_scale != 2) s->font_scale = 1;
 	if (s->rotation != 180) s->rotation = 0;
 	for (size_t i = 0; i < s->nlines; i++) {
@@ -339,6 +342,17 @@ static int default_iface(char *out, size_t cap)
 	fclose(f); return -1;
 }
 
+static void format_duration(double seconds, char *out, size_t cap)
+{
+	int h, m;
+	if (seconds < 0) { snprintf(out, cap, "--"); return; }
+	h = (int)(seconds / 3600.0);
+	m = (int)((int)seconds % 3600) / 60;
+	if (h > 0) snprintf(out, cap, "%dh %02dm", h, m);
+	else if (m > 0) snprintf(out, cap, "%d min", m);
+	else snprintf(out, cap, "under 1 min");
+}
+
 static int source_value(const char *source, char *out, size_t cap)
 {
 	char buf[8192], path[256], iface[IFNAMSIZ];
@@ -373,6 +387,40 @@ static int source_value(const char *source, char *out, size_t cap)
 			if (sscanf(buf, "MemAvailable: %lu kB", &kb) == 1) break;
 		fclose(f); if (!kb) return -1;
 		snprintf(out, cap, "%lu MB", kb / 1024); return 0;
+	}
+	if (!strcmp(source, "power_source")) {
+		if (read_small("/sys/class/power_supply/pm8916-lbc-chgr/online", buf, sizeof(buf)) < 0)
+			return -1;
+		snprintf(out, cap, "%s", !strcmp(buf, "1") ? "USB/AC" : "Battery");
+		return 0;
+	}
+	if (!strcmp(source, "estimated_remaining")) {
+		char online[32], capacity[32], line[128];
+		long start = 0, start_cap = 0, now = (long)time(NULL);
+		int current;
+		if (read_small("/sys/class/power_supply/pm8916-lbc-chgr/online", online, sizeof(online)) < 0 || strcmp(online, "0"))
+			return -1;
+		if (read_small("/sys/class/power_supply/pm8916-bms-vm/capacity", capacity, sizeof(capacity)) < 0)
+			return -1;
+		char *cap_end;
+		long cap_value = strtol(capacity, &cap_end, 10);
+		if (cap_end == capacity || *cap_end || cap_value < 0 || cap_value > 100)
+			return -1;
+		current = (int)cap_value;
+		FILE *sf = fopen("/etc/battery-session", "r");
+		if (!sf) return -1;
+		while (fgets(line, sizeof(line), sf)) {
+			if (!strncmp(line, "start=", 6)) start = atol(line + 6);
+			else if (!strncmp(line, "start_cap=", 10)) start_cap = atol(line + 10);
+		}
+		fclose(sf);
+		long elapsed = now - start;
+		if (!start || elapsed < 300 || start_cap <= current || current < 0)
+			return -1;
+		double rate = (double)(start_cap - current) / ((double)elapsed / 3600.0);
+		if (rate < 0.2) return -1;
+		format_duration((double)current / rate * 3600.0, out, cap);
+		return 0;
 	}
 	if (!strcmp(source, "battery")) {
 		DIR *d = opendir("/sys/class/power_supply"); struct dirent *de;
@@ -447,24 +495,65 @@ static int render(uint8_t *frame, int w, int h, int stride,
 
 static int write_frame(int fd, const uint8_t *frame, size_t bytes)
 {
-	ssize_t n;
+	size_t done = 0;
 	if (lseek(fd, 0, SEEK_SET) < 0) return -1;
-	n = write(fd, frame, bytes);
-	return n == (ssize_t)bytes ? 0 : -1;
+	while (done < bytes) {
+		ssize_t n = write(fd, frame + done, bytes - done);
+		if (n < 0 && errno == EINTR) continue;
+		if (n <= 0) return -1;
+		done += (size_t)n;
+	}
+	return 0;
 }
 
-static int run(const char *fbpath, int test_mode)
+static int panel_command(const char *text)
+{
+	int fd = open("/sys/kernel/debug/dri/0/command", O_WRONLY | O_CLOEXEC);
+	ssize_t n;
+	if (fd < 0) return -1;
+	do { n = write(fd, text, strlen(text)); } while (n < 0 && errno == EINTR);
+	close(fd);
+	/* This debugfs command reports 1 byte written even when the full text is accepted. */
+	return n < 0 ? -1 : 0;
+}
+
+static int panel_orientation(int fd, const uint8_t *frame, size_t bytes)
+{
+	int rc = 0;
+	if (panel_command("36 E8\n") < 0) { perror("lcdstatusd: panel orientation E8"); rc = -1; }
+	if (write_frame(fd, frame, bytes) < 0) { perror("lcdstatusd: panel frame E8"); rc = -1; }
+	if (panel_command("36 C8\n") < 0) { perror("lcdstatusd: panel orientation C8"); rc = -1; }
+	if (write_frame(fd, frame, bytes) < 0) { perror("lcdstatusd: panel frame C8"); rc = -1; }
+	return rc;
+}
+
+static unsigned long long uptime_ms(void)
+{
+	char buf[64];
+	if (read_small("/proc/uptime", buf, sizeof(buf)) < 0) return 0;
+	return (unsigned long long)(atof(buf) * 1000.0);
+}
+
+static unsigned long long activity_marker(void)
+{
+	char buf[64];
+	if (read_small("/var/run/lcdstatus.activity", buf, sizeof(buf)) < 0) return 0;
+	return strtoull(buf, NULL, 10);
+}
+
+static int run(const char *fbpath, int test_mode, int orientation_only)
 {
 	struct settings s;
 	const char *cfg = getenv("LCDSTATUS_CONFIG");
 	struct fb_var_screeninfo v;
 	struct fb_fix_screeninfo f;
-	int fd = -1, w, h, stride, scale, result = 0;
+	int fd = -1, w, h, stride, scale, result = 0, auto_off_active = 0;
+	unsigned long long last_activity, last_marker;
 	size_t bytes;
 	uint8_t *frame;
 	if (!cfg) cfg = DEFAULT_CONFIG;
 	if (load_settings(&s, cfg) < 0) { perror("lcdstatusd: config"); return 1; }
-	if (!s.enabled && !test_mode) return 0;
+	if (!s.enabled && !test_mode && !orientation_only) return 0;
 	if (test_mode) {
 		w = 128; h = 128; stride = w * 2;
 		fd = open(fbpath, O_CREAT | O_TRUNC | O_WRONLY, 0600);
@@ -495,7 +584,14 @@ static int run(const char *fbpath, int test_mode)
 	if (!frame) { perror("lcdstatusd: frame"); close(fd); return 1; }
 	s.rotation = s.rotation == 180 ? 180 : 0;
 	scale = s.font_scale;
-	if (!test_mode) backlight_set(s.backlight);
+	if (!test_mode) {
+		backlight_set(s.backlight);
+		if (!getenv("LCDSTATUS_ORIENTATION_DONE") && panel_orientation(fd, frame, bytes) < 0)
+			fprintf(stderr, "lcdstatusd: panel orientation sequence reported an error\n");
+	}
+	if (orientation_only) { free(frame); close(fd); return result; }
+	last_activity = uptime_ms();
+	last_marker = activity_marker();
 	if (test_mode) {
 		render(frame, w, h, stride, &s);
 		if (write_frame(fd, frame, bytes) < 0) { perror("lcdstatusd: write"); result = 1; }
@@ -503,8 +599,18 @@ static int run(const char *fbpath, int test_mode)
 	} else {
 		while (!stopping) {
 			struct timespec ts;
+			unsigned long long marker, now;
 			render(frame, w, h, stride, &s);
 			if (write_frame(fd, frame, bytes) < 0) { perror("lcdstatusd: framebuffer write"); result = 1; break; }
+			marker = activity_marker(); now = uptime_ms();
+			if (marker > last_marker) {
+				last_marker = marker; last_activity = now; auto_off_active = 0;
+			}
+			if (s.auto_off_s > 0 && !auto_off_active && now >= last_activity &&
+			    now - last_activity >= (unsigned long long)s.auto_off_s * 1000ULL) {
+				if (backlight_set(0) < 0) perror("lcdstatusd: automatic backlight off");
+				else { auto_off_active = 1; fprintf(stderr, "lcdstatusd: idle timeout turned backlight off\n"); }
+			}
 			ts.tv_sec = s.refresh_s; ts.tv_nsec = 0;
 			while (!stopping && nanosleep(&ts, &ts) < 0 && errno == EINTR) {}
 		}
@@ -516,13 +622,14 @@ static int run(const char *fbpath, int test_mode)
 int main(int argc, char **argv)
 {
 	const char *path = "/dev/fb0";
-	int test = 0;
+	int test = 0, orient = 0;
 	if (argc == 3 && !strcmp(argv[1], "--test-fb")) { path = argv[2]; test = 1; }
+	else if (argc == 2 && !strcmp(argv[1], "--orientation-only")) orient = 1;
 	else if (argc > 1 && strcmp(argv[1], "--help")) {
-		fprintf(stderr, "usage: lcdstatusd [--test-fb FILE]\n"); return 2;
+		fprintf(stderr, "usage: lcdstatusd [--test-fb FILE|--orientation-only]\n"); return 2;
 	} else if (argc > 1) {
-		printf("usage: lcdstatusd [--test-fb FILE]\n"); return 0;
+		printf("usage: lcdstatusd [--test-fb FILE|--orientation-only]\n"); return 0;
 	}
 	signal(SIGTERM, on_signal); signal(SIGINT, on_signal);
-	return run(path, test);
+	return run(path, test, orient);
 }
