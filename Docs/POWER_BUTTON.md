@@ -68,16 +68,19 @@ Implementation notes (all learned the hard way):
 
 ## Tuning
 
-Thresholds are constants at the top of
-[`etc/rc.button/power`](../msm89xx/base-files/etc/rc.button/power):
+The behavior is controlled by `/etc/config/pwrkey` (LuCI: **System → Power Button**):
 
-| Variable | Default | Meaning |
-| :------- | :------ | :------ |
-| `SHORT_MAX` | 2 | longest press still counted as "short" (seconds) |
-| `LONG_HOLD` | 4 | shortest press that powers off / reboots (seconds) |
-| `DBL_WINDOW` | 800 | double-press window (milliseconds) |
+| UCI option | Default | Meaning |
+| :---------- | :------ | :------ |
+| `double_press_reboot` | `1` | Enable the two-short-press reboot action |
+| `double_press_window_ms` | `800` | Maximum milliseconds between short presses (100–10000) |
+| `short_press_action` | `lcd-toggle` | Toggle/wake the LCD when the board package provides it; `none` disables the action |
+| `long_hold_s` | `4` | Hold duration that powers off/reboots (3–9 s) |
 
-Keep `LONG_HOLD` below ~10 s: past that the PMIC resets the board itself and
+Example: `uci set pwrkey.main.double_press_window_ms=1000 && uci commit pwrkey`.
+
+
+Keep `long_hold_s` below 10 seconds: past that the PMIC resets the board itself and
 the script never sees the release.
 
 On JZ08C, the off-charge package marker enables the LCD toggle and poweroff

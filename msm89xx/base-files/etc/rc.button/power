@@ -21,9 +21,18 @@
 # ~10-15 s lets the PMIC hard-reset (reboot) take over.
 
 SHORT_MAX=2
-LONG_HOLD=4
-DBL_WINDOW=800
+LONG_HOLD=$(uci -q get pwrkey.main.long_hold_s)
+DBL_WINDOW=$(uci -q get pwrkey.main.double_press_window_ms)
+DBL_REBOOT=$(uci -q get pwrkey.main.double_press_reboot)
+SHORT_ACTION=$(uci -q get pwrkey.main.short_press_action)
+case "$LONG_HOLD" in ''|*[!0-9]*) LONG_HOLD=4 ;; esac
+[ "$LONG_HOLD" -ge 3 ] 2>/dev/null && [ "$LONG_HOLD" -le 9 ] 2>/dev/null || LONG_HOLD=4
+case "$DBL_WINDOW" in ''|*[!0-9]*) DBL_WINDOW=800 ;; esac
+[ "$DBL_WINDOW" -ge 100 ] 2>/dev/null && [ "$DBL_WINDOW" -le 10000 ] 2>/dev/null || DBL_WINDOW=800
+case "$DBL_REBOOT" in 0|1) ;; *) DBL_REBOOT=1 ;; esac
+case "$SHORT_ACTION" in lcd-toggle|none) ;; *) SHORT_ACTION=lcd-toggle ;; esac
 STATE=/var/run/powerbtn.dbl
+ACTIVITY=/var/run/lcdstatus.activity
 
 LCD_BRIGHTNESS=/sys/class/backlight/jz08c-lcd-backlight/brightness
 
@@ -31,7 +40,12 @@ lcd_toggle() {
     [ -e /usr/share/jz08c-offcharge/jz08c-board ] || return 0
     [ -r "$LCD_BRIGHTNESS" ] && [ -w "$LCD_BRIGHTNESS" ] || return 0
     case "$(cat "$LCD_BRIGHTNESS" 2>/dev/null)" in
-        0) echo 1 > "$LCD_BRIGHTNESS" ;;
+        0)
+            restore=$(uci -q get lcdstatus.main.backlight_brightness)
+            case "$restore" in ''|*[!0-9]*) restore=1 ;; esac
+            [ "$restore" -gt 0 ] || restore=1
+            echo "$restore" > "$LCD_BRIGHTNESS"
+            ;;
         *) echo 0 > "$LCD_BRIGHTNESS" ;;
     esac
 }
@@ -68,7 +82,8 @@ SEEN="${SEEN%.*}"
 now_ms=$(awk '{ printf "%d", $1 * 1000 }' /proc/uptime)
 
 if [ "$SEEN" -le "$SHORT_MAX" ] 2>/dev/null; then
-    if [ -f "$STATE" ]; then
+    echo "$now_ms" > "$ACTIVITY"
+    if [ "$DBL_REBOOT" = "1" ] && [ -f "$STATE" ]; then
         last=$(cat "$STATE" 2>/dev/null)
         if [ -n "$last" ] && [ $((now_ms - last)) -le "$DBL_WINDOW" ] 2>/dev/null; then
             rm -f "$STATE"
@@ -78,9 +93,9 @@ if [ "$SEEN" -le "$SHORT_MAX" ] 2>/dev/null; then
             exit 0
         fi
     fi
-    echo "$now_ms" > "$STATE"
-    # JZ08C only: toggle on the first short press; package marker gates it.
-    lcd_toggle
+    if [ "$DBL_REBOOT" = "1" ]; then echo "$now_ms" > "$STATE"; else rm -f "$STATE"; fi
+    # The package marker gates the LCD action to JZ08C; other boards no-op.
+    [ "$SHORT_ACTION" = "lcd-toggle" ] && lcd_toggle
     exit 0
 elif [ "$SEEN" -ge "$LONG_HOLD" ] 2>/dev/null; then
     rm -f "$STATE"
