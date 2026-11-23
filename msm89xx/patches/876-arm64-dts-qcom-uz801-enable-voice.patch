@@ -1,0 +1,13 @@
+From: isp <40058476+isprogrammer@users.noreply.github.com>
+Subject: [PATCH] arm64: dts: qcom: yiming-uz801v3: enable call audio
+
+Include the shared MSM8916 Q6Voice sound card overlay used by UFI003 and
+MIFIB-V12. It routes QDSP6 voice over APR and the internal BT SCO link, with
+no board-specific codec pin assignments.
+
+---
+diff --git a/arch/arm64/boot/dts/qcom/msm8916-yiming-uz801v3.dts b/arch/arm64/boot/dts/qcom/msm8916-yiming-uz801v3.dts
+--- a/arch/arm64/boot/dts/qcom/msm8916-yiming-uz801v3.dts
++++ b/arch/arm64/boot/dts/qcom/msm8916-yiming-uz801v3.dts
+@@ -5,0 +6 @@
++#include "msm8916-ufi-voice.dtsi"
