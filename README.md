@@ -80,6 +80,7 @@ Recent additions on top of the base port:
 | **`uf896`**     | `generic-uf896`     | UF896 (v1.1) 4G LTE Router  | MSM8916 | 512 MB | 4 GB eMMC | Tri-colour + charger/network/wifi/data LEDs |
 | **`jz02`**      | `generic-jz02`      | JZ02 Battery MiFi (3 SIM switch lines) | MSM8916 | 512 MB | 4 GB eMMC | Network tri-colour + Wi-Fi red + battery red/green |
 | **`jz0145`**    | `generic-jz0145`    | JZ0145 V33 Stick | MSM8916 | 512 MB | 4 GB eMMC | Green / Blue / Red |
+| **`jz08c-v51`** | `generic-jz08c-v51` | JZ08C V51 experimental | MSM8916 | 512 MB | 4 GB eMMC | No indicator LEDs mapped |
 
 ### Per-board feature matrix
 
@@ -95,6 +96,7 @@ Recent additions on top of the base port:
 | `uf896` |    ✅       |    ✅     |          ✅           |          ✅           |           ✅            |         ✅          |         —          |
 | `jz02` |    —       |    ✅     |          ✅           |          ✅           |           ✅            |         ✅          |         —          |
 | `jz0145` |    ✅    |    ✅    |          ✅           |          ✅           |           ✅            |         ✅          |         —          |
+| `jz08c-v51` |    —       |    ✅     |          ✅           |          ✅           |           ✅            |         —          |         —          |
 
 * UZ801 v3 has no Bluetooth antenna; its image includes the software, but Bluetooth is unavailable on that board.
 * **Concurrent AP+STA** (Station Mode) is available on **every board** — the service, the mac80211 patches and `luci-app-wifi-sta` are all target-wide; see [the guide](Docs/WiFi/AP_STA_AND_LUCI_APP.md).
@@ -113,6 +115,7 @@ Recent additions on top of the base port:
 | `uf896` |         —           |      —      |         —         |      —      |
 | `jz02` |         ✅           |      ✅      |         ✅         |      —      |
 | `jz0145` |       —            |      —       |         ✅         |      —      |
+| `jz08c-v51` |         —           |      ✅      |         —         |         —      |
 
 * **Recovery partition** — the 17-partition layout (`misc` + `recovery`).  A `—` means the board keeps the 15-partition layout; see [`Docs/RECOVERY/`](Docs/RECOVERY/).
 * **3-SIM selection** — the JZ02 has three SIM switch lines (GPIO 1 / 22 / 23) but only the external slot (3) is accessible on the tested unit; the `sim-select` init script picks the slot from `uci sim.slot` (default 3). It is not automatic hot-swap.
