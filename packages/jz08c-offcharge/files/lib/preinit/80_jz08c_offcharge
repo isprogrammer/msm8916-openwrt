@@ -1,0 +1,98 @@
+#!/bin/sh
+jz08c_offcharge_preinit() {
+	cmdline="$(cat /proc/cmdline 2>/dev/null)"
+	charge_mode=0
+	case " $cmdline " in
+		*" androidboot.mode=charger "*) charge_mode=1 ;;
+	esac
+
+	pon_reason=
+	cold_boot=
+	for arg in $cmdline; do
+		case "$arg" in
+			lk2nd.pon_reason=*) pon_reason=${arg#*=} ;;
+			lk2nd.cold_boot=*) cold_boot=${arg#*=} ;;
+		esac
+	done
+
+	# Old lk2nd images have neither field; preserve the legacy cmdline gate.
+	case "$pon_reason:$cold_boot" in
+		0x[0-9a-fA-F][0-9a-fA-F]:0|0x[0-9a-fA-F][0-9a-fA-F]:1)
+			pon_value=$((pon_reason))
+			if [ $((pon_value & 0x10)) -ne 0 ] &&
+			   [ $((pon_value & 0x86)) -eq 0 ] &&
+			   [ "$cold_boot" -eq 1 ]; then
+				charge_mode=1
+			fi
+			;;
+	esac
+
+	# This hook is shipped only by the JZ08C package. Load the panel through
+	# this board's private early module list, leaving shared kmod autoload alone.
+	/sbin/kmodloader /etc/modules-boot.d >/dev/null 2>&1
+	grep -q "^panel_mipi_dbi " /proc/modules 2>/dev/null ||
+		modprobe panel-mipi-dbi 2>/dev/null
+	if ! grep -q "^panel_mipi_dbi " /proc/modules 2>/dev/null; then
+		logger -t jz08c-offcharge "panel-mipi-dbi unavailable"
+		[ "$charge_mode" -eq 1 ] && reboot -f
+		return 0
+	fi
+	mdev -s
+	i=0
+	while [ ! -e /dev/fb0 ] && [ "$i" -lt 4 ]; do
+		sleep 1
+		mdev -s
+		i=$((i + 1))
+	done
+	if [ ! -e /dev/fb0 ]; then
+		logger -t jz08c-offcharge "fb0 unavailable"
+		[ "$charge_mode" -eq 1 ] && reboot -f
+		return 0
+	fi
+
+	[ ! -w /sys/class/graphics/fbcon/cursor_blink ] ||
+		echo 0 > /sys/class/graphics/fbcon/cursor_blink
+	for vt in /sys/class/vtconsole/vtcon*; do
+		[ -r "$vt/name" ] || continue
+		case "$(cat "$vt/name" 2>/dev/null)" in
+			*"frame buffer"*)
+				[ ! -w "$vt/bind" ] || echo 0 > "$vt/bind"
+				;;
+		esac
+	done
+
+	if [ "$charge_mode" -eq 1 ]; then
+		/usr/sbin/jz08c-power-ui --charge
+		rc=$?
+		# Success means KEY_POWER: return to normal preinit. Failure fallback reboots.
+		[ "$rc" -eq 0 ] && return 0
+		reboot -f
+	else
+		# The splash helper is installed on the root filesystem, so defer normal-boot
+		# rendering until the post-mount hook below.
+		return 0
+	fi
+}
+
+jz08c_poweron_splash() {
+	[ -x /usr/sbin/jz08c-power-ui ] || {
+		logger -t jz08c-offcharge "power-on splash helper unavailable after root mount"
+		return 0
+	}
+	mdev -s
+	i=0
+	while [ ! -e /dev/fb0 ] && [ "$i" -lt 4 ]; do
+		sleep 1
+		mdev -s
+		i=$((i + 1))
+	done
+	if [ ! -e /dev/fb0 ]; then
+		logger -t jz08c-offcharge "fb0 unavailable after root mount; splash skipped"
+		return 0
+	fi
+	/usr/sbin/jz08c-power-ui --poweron ||
+		logger -t jz08c-offcharge "power-on splash failed"
+}
+
+boot_hook_add preinit_main jz08c_offcharge_preinit
+boot_hook_add preinit_mount_root jz08c_poweron_splash

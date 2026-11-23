@@ -8,7 +8,7 @@
 #
 # Behaviour (kept clear of the PMIC own ~10-15 s hard-reset, which
 # power-cycles the board regardless of software):
-#   * short press              -> nothing (anti-accidental)
+#   * short press              -> JZ08C LCD toggle; otherwise nothing
 #   * two short presses        -> reboot      (within DBL_WINDOW ms)
 #   * long press (>= LONG_HOLD s, released) -> power off (shutdown)
 #                                              -> reboot when running on
@@ -21,9 +21,34 @@
 # ~10-15 s lets the PMIC hard-reset (reboot) take over.
 
 SHORT_MAX=2
-LONG_HOLD=4
-DBL_WINDOW=800
+LONG_HOLD=$(uci -q get pwrkey.main.long_hold_s)
+DBL_WINDOW=$(uci -q get pwrkey.main.double_press_window_ms)
+DBL_REBOOT=$(uci -q get pwrkey.main.double_press_reboot)
+SHORT_ACTION=$(uci -q get pwrkey.main.short_press_action)
+case "$LONG_HOLD" in ''|*[!0-9]*) LONG_HOLD=4 ;; esac
+[ "$LONG_HOLD" -ge 3 ] 2>/dev/null && [ "$LONG_HOLD" -le 9 ] 2>/dev/null || LONG_HOLD=4
+case "$DBL_WINDOW" in ''|*[!0-9]*) DBL_WINDOW=800 ;; esac
+[ "$DBL_WINDOW" -ge 100 ] 2>/dev/null && [ "$DBL_WINDOW" -le 10000 ] 2>/dev/null || DBL_WINDOW=800
+case "$DBL_REBOOT" in 0|1) ;; *) DBL_REBOOT=1 ;; esac
+case "$SHORT_ACTION" in lcd-toggle|none) ;; *) SHORT_ACTION=lcd-toggle ;; esac
 STATE=/var/run/powerbtn.dbl
+ACTIVITY=/var/run/lcdstatus.activity
+
+LCD_BRIGHTNESS=/sys/class/backlight/jz08c-lcd-backlight/brightness
+
+lcd_toggle() {
+    [ -e /usr/share/jz08c-offcharge/jz08c-board ] || return 0
+    [ -r "$LCD_BRIGHTNESS" ] && [ -w "$LCD_BRIGHTNESS" ] || return 0
+    case "$(cat "$LCD_BRIGHTNESS" 2>/dev/null)" in
+        0)
+            restore=$(uci -q get lcdstatus.main.backlight_brightness)
+            case "$restore" in ''|*[!0-9]*) restore=1 ;; esac
+            [ "$restore" -gt 0 ] || restore=1
+            echo "$restore" > "$LCD_BRIGHTNESS"
+            ;;
+        *) echo 0 > "$LCD_BRIGHTNESS" ;;
+    esac
+}
 
 # Is the board running from an external supply?
 #
@@ -43,6 +68,16 @@ vbus_online() {
     return 1
 }
 
+# JZ08C-only display transition. The package marker is absent on other boards.
+jz08c_shutdown_display() {
+    mode="$1"
+    [ -e /usr/share/jz08c-offcharge/jz08c-board ] || return 0
+    touch /var/run/lcdstatus.shutdown
+    /etc/init.d/lcdstatusd stop >/dev/null 2>&1
+    /usr/sbin/jz08c-power-ui "--$mode" ||
+        logger -t power-button "JZ08C $mode screen failed"
+}
+
 LED=/sys/class/leds/red:wan
 [ -d "$LED" ] || LED=/sys/class/leds/green:wan
 [ -d "$LED" ] || LED=/sys/class/leds/red:bat
@@ -57,17 +92,21 @@ SEEN="${SEEN%.*}"
 now_ms=$(awk '{ printf "%d", $1 * 1000 }' /proc/uptime)
 
 if [ "$SEEN" -le "$SHORT_MAX" ] 2>/dev/null; then
-    if [ -f "$STATE" ]; then
+    echo "$now_ms" > "$ACTIVITY"
+    if [ "$DBL_REBOOT" = "1" ] && [ -f "$STATE" ]; then
         last=$(cat "$STATE" 2>/dev/null)
         if [ -n "$last" ] && [ $((now_ms - last)) -le "$DBL_WINDOW" ] 2>/dev/null; then
             rm -f "$STATE"
             logger -t power-button "Double-press: rebooting"
             sync
+            jz08c_shutdown_display reboot
             reboot
             exit 0
         fi
     fi
-    echo "$now_ms" > "$STATE"
+    if [ "$DBL_REBOOT" = "1" ]; then echo "$now_ms" > "$STATE"; else rm -f "$STATE"; fi
+    # The package marker gates the LCD action to JZ08C; other boards no-op.
+    [ "$SHORT_ACTION" = "lcd-toggle" ] && lcd_toggle
     exit 0
 elif [ "$SEEN" -ge "$LONG_HOLD" ] 2>/dev/null; then
     rm -f "$STATE"
@@ -75,24 +114,30 @@ elif [ "$SEEN" -ge "$LONG_HOLD" ] 2>/dev/null; then
     if vbus_online; then
         logger -t power-button "Power button held ${SEEN}s on VBUS: rebooting"
         sync
+        jz08c_shutdown_display reboot
         reboot
         exit 0
     fi
 
     logger -t power-button "Power button held ${SEEN}s: powering off"
 
-    max=$(cat "$LED/max_brightness" 2>/dev/null)
-    [ -n "$max" ] || max=1
-    echo none > "$LED/trigger" 2>/dev/null
-    i=0
-    while [ "$i" -lt 6 ]; do
-        echo "$max" > "$LED/brightness" 2>/dev/null
-        usleep 120000
-        echo 0 > "$LED/brightness" 2>/dev/null
-        usleep 120000
-        i=$((i + 1))
-    done
+    # lcdstatusd handles the JZ08C procd shutdown hook, so the message is
+    # drawn after the system commits to poweroff while fb0 remains open.
+    if [ ! -e /usr/share/jz08c-offcharge/jz08c-board ]; then
+        max=$(cat "$LED/max_brightness" 2>/dev/null)
+        [ -n "$max" ] || max=1
+        echo none > "$LED/trigger" 2>/dev/null
+        i=0
+        while [ "$i" -lt 6 ]; do
+            echo "$max" > "$LED/brightness" 2>/dev/null
+            usleep 120000
+            echo 0 > "$LED/brightness" 2>/dev/null
+            usleep 120000
+            i=$((i + 1))
+        done
+    fi
 
+    jz08c_shutdown_display poweroff
     exec /sbin/poweroff
 else
     rm -f "$STATE"

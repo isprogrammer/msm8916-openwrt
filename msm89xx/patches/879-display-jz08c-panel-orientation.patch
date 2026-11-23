@@ -1,0 +1,42 @@
+From: isp <40058476+isprogrammer@users.noreply.github.com>
+Subject: [PATCH] drm/panel: flush full frames on JZ08C
+
+Ignore damage clips on the JZ08C panel so each update transfers the full
+frame. Leave the panel init sequence and other panel compatibles unchanged.
+
+---
+--- a/drivers/gpu/drm/tiny/panel-mipi-dbi.c
++++ b/drivers/gpu/drm/tiny/panel-mipi-dbi.c
+@@ -238,7 +238,12 @@
+ {
+ 	struct mipi_dbi_dev *dbidev = drm_to_mipi_dbi_dev(pipe->crtc.dev);
+ 	struct mipi_dbi *dbi = &dbidev->dbi;
++	bool jz08c = of_device_is_compatible(pipe->crtc.dev->dev->of_node,
++					    "sitronix,st7735s-jz08c-v51");
+ 	int ret, idx;
++
++	if (jz08c && dbidev->backlight)
++		backlight_disable(dbidev->backlight);
+ 
+ 	if (!drm_dev_enter(pipe->crtc.dev, &idx))
+ 		return;
+@@ -256,8 +261,19 @@
+ 	drm_dev_exit(idx);
+ }
+ 
++static int panel_mipi_dbi_check(struct drm_simple_display_pipe *pipe,
++				     struct drm_plane_state *plane_state,
++				     struct drm_crtc_state *crtc_state)
++{
++	plane_state->ignore_damage_clips =
++		of_device_is_compatible(pipe->crtc.dev->dev->of_node,
++					"sitronix,st7735s-jz08c-v51");
++	return 0;
++}
++
+ static const struct drm_simple_display_pipe_funcs panel_mipi_dbi_pipe_funcs = {
+ 	DRM_MIPI_DBI_SIMPLE_DISPLAY_PIPE_FUNCS(panel_mipi_dbi_enable),
++	.check = panel_mipi_dbi_check,
+ };
+ 
+ DEFINE_DRM_GEM_DMA_FOPS(panel_mipi_dbi_fops);

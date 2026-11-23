@@ -238,12 +238,12 @@ define Device/generic-jz08c-v51
 	SUPPORTED_DEVICES := jz08c-v51,generic
 	FILESYSTEMS := squashfs
 	GPT_TOT_SECTORS := 7634944
-	CMDLINE := "earlycon console=tty0 console=ttyMSM0,115200 root=/dev/mmcblk0p14 rootfstype=squashfs rootwait"
+	CMDLINE := "earlycon console=ttyMSM0,115200 vt.global_cursor_default=0 root=/dev/mmcblk0p14 rootfstype=squashfs rootwait"
 	DEVICE_PACKAGES := msm89xx-scripts wpad-basic-wolfssl rmtfs uci-usb-gadget \
 		block-mount f2fs-tools tar \
 		msm-firmware-dumper reboot-edl qcom-carrier-autocfg \
-		diag-efs diag-logtool msm89xx-firmware-upgrade luci-app-update-notify
-	DEVICE_PACKAGES += luci-app-battery
+		diag-efs diag-logtool msm89xx-firmware-upgrade luci-app-update-notify kmod-drm-panel-mipi-dbi jz08c-st7735s-firmware
+	DEVICE_PACKAGES += luci-app-battery jz08c-offcharge lcd-status luci-app-lcd-status
 	DEVICE_PACKAGES += kmod-sound-msm8916-voice alsa-utils ufi-voice ufi-voice-asterisk
 endef
 TARGET_DEVICES += generic-jz08c-v51

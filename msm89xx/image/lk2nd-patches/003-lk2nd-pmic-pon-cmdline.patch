@@ -1,0 +1,82 @@
+diff --git a/lk2nd/device/device.c b/lk2nd/device/device.c
+index 9e309481..05f0e9bd 100644
+--- a/lk2nd/device/device.c
++++ b/lk2nd/device/device.c
+@@ -4,6 +4,9 @@
+ #include <debug.h>
+ #include <dev_tree.h>
+ #include <fastboot.h>
++#include <pm8x41.h>
++#include <pm8x41_hw.h>
++#include <stdio.h>
+ #include <string.h>
+ 
+ #include <libfdt.h>
+@@ -210,6 +213,16 @@ unsigned char *lk2nd_device_update_cmdline(const char *cmdline, enum boot_type b
+ 	if (boot_type & BOOT_LK2ND)
+ 		cmdline = "lk2nd.compatible=" LK2ND_COMPATIBLE;
+ #endif
++	/* Preserve the PM8916 power-on reason for userspace diagnostics. */
++	if (boot_type & BOOT_ANDROID) {
++		char pon_args[80];
++
++		snprintf(pon_args, sizeof(pon_args),
++			 "lk2nd.pon_reason=0x%02x lk2nd.cold_boot=%d",
++			 pm8x41_get_pon_reason(),
++			 pm8x41_get_is_cold_boot());
++		cmdline = (const char *)concat_cmdline(cmdline, pon_args);
++	}
+ #if WITH_LK2ND_DEVICE_2ND
+ 	if (lk2nd_dev.cmdline)
+ 		return concat_cmdline(cmdline, lk2nd_dev.cmdline);
+diff --git a/app/aboot/aboot.c b/app/aboot/aboot.c
+--- a/app/aboot/aboot.c
++++ b/app/aboot/aboot.c
+@@ -1086,9 +1086,14 @@
+ static unsigned char *update_cmdline2(const char *cmdline, enum boot_type boot_type)
+ {
+ #if GENERATE_CMDLINE_ONLY_FOR_ANDROID
+-	if (!(boot_type & (BOOT_ANDROID | BOOT_LK2ND)))
++	if (!(boot_type & (BOOT_ANDROID | BOOT_LK2ND))) {
++#if WITH_LK2ND_DEVICE
++		return lk2nd_device_append_pon_cmdline(cmdline);
++#else
+ 		return (unsigned char*)strdup(cmdline);
+ #endif
++	}
++#endif
+ #if WITH_LK2ND_DEVICE
+ 	return lk2nd_device_update_cmdline(cmdline, boot_type);
+ #else
+diff --git a/lk2nd/device/device.c b/lk2nd/device/device.c
+--- a/lk2nd/device/device.c
++++ b/lk2nd/device/device.c
+@@ -202,6 +202,17 @@
+ 	return r;
+ }
+ 
++unsigned char *lk2nd_device_append_pon_cmdline(const char *cmdline)
++{
++	char pon_args[80];
++
++	snprintf(pon_args, sizeof(pon_args),
++		 "lk2nd.pon_reason=0x%02x lk2nd.cold_boot=%d",
++		 pm8x41_get_pon_reason(),
++		 pm8x41_get_is_cold_boot());
++	return concat_cmdline(cmdline, pon_args);
++}
++
+ unsigned char *lk2nd_device_update_cmdline(const char *cmdline, enum boot_type boot_type)
+ {
+ #ifdef LK2ND_COMPATIBLE
+diff --git a/lk2nd/include/lk2nd/device.h b/lk2nd/include/lk2nd/device.h
+--- a/lk2nd/include/lk2nd/device.h
++++ b/lk2nd/include/lk2nd/device.h
+@@ -5,6 +5,7 @@
+ #include <boot.h>
+ 
+ unsigned char *lk2nd_device_update_cmdline(const char *cmdline, enum boot_type boot_type);
++unsigned char *lk2nd_device_append_pon_cmdline(const char *cmdline);
+ 
+ bool lk2nd_device2nd_have_atags(void) __PURE;
+ void lk2nd_device2nd_copy_atags(void *tags, const char *cmdline,

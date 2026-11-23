@@ -62,26 +62,87 @@ local function fmt_dur(sec)
     return "under 1 min"
 end
 
+local function first_charge_section(uci)
+    local name
+    local ok, err = uci:foreach("battery", "charge", function(section)
+        name = section[".name"]
+        return false
+    end)
+
+    if err then
+        return nil, err
+    end
+
+    return name
+end
+
+local function parse_integer(value)
+    if type(value) ~= "string" or not value:match("^%d+$") then
+        return nil
+    end
+
+    return tonumber(value)
+end
+
+local function discard_battery_changes(uci, sys)
+    local ok = uci:revert("battery")
+    if not ok then
+        sys.call("logger -t luci-app-battery 'could not discard failed charge-limit update'")
+    end
+end
+
 function action_status()
     local http = require "luci.http"
     local uci  = require "luci.model.uci".cursor()
     local sys  = require "luci.sys"
 
     local act = http.formvalue("act")
+    local save_error
+
     if act == "apply" then
-        local limit   = http.formvalue("limit")
-        local resume  = http.formvalue("resume")
+        local limit = parse_integer(http.formvalue("limit"))
+        local resume = parse_integer(http.formvalue("resume"))
         local enabled = http.formvalue("enabled")
-        if limit and #limit > 0 then
-            uci:set("battery", "@charge[0]", "limit", limit)
+
+        if not limit or limit < 50 or limit > 100 or
+           not resume or resume < 0 or resume > 99 or resume >= limit or
+           (enabled ~= "0" and enabled ~= "1") then
+            save_error = "invalid"
+        else
+            local section, err = first_charge_section(uci)
+
+            if err then
+                save_error = "save"
+            else
+                if not section then
+                    section, err = uci:add("battery", "charge")
+                end
+
+                if not section then
+                    save_error = "save"
+                else
+                    local ok
+                    ok, err = uci:set("battery", section, "limit", tostring(limit))
+                    if ok then
+                        ok, err = uci:set("battery", section, "resume", tostring(resume))
+                    end
+                    if ok then
+                        ok, err = uci:set("battery", section, "enabled", enabled)
+                    end
+
+                    if ok then
+                        ok, err = uci:commit("battery")
+                    end
+
+                    if ok then
+                        sys.call("/etc/init.d/battery-charge-limit restart >/dev/null 2>&1")
+                    else
+                        save_error = "save"
+                        discard_battery_changes(uci, sys)
+                    end
+                end
+            end
         end
-        if resume and #resume > 0 then
-            uci:set("battery", "@charge[0]", "resume", resume)
-        end
-        uci:set("battery", "@charge[0]", "enabled",
-                (enabled == "1") and "1" or "0")
-        uci:commit("battery")
-        sys.call("/etc/init.d/battery-charge-limit restart >/dev/null 2>&1")
     elseif act == "charge" then
         local v = http.formvalue("val")
         sys.call("echo " .. ((v == "1") and "1" or "0") ..
@@ -113,6 +174,15 @@ function action_status()
         end
     end
 
+    local charge = {}
+    local charge_name = first_charge_section(uci)
+    if charge_name then
+        local values = uci:get_all("battery", charge_name)
+        if type(values) == "table" then
+            charge = values
+        end
+    end
+
     local d = {
         online  = rd(CHG .. "/online"),
         ce      = rd(CHG .. "/charge_enabled"),
@@ -125,9 +195,10 @@ function action_status()
         health  = rd(BATT .. "/health"),
         status  = rd(BATT .. "/status"),
         design  = rd(BATT .. "/charge_full_design"),
-        enabled = uci:get("battery", "@charge[0]", "enabled") or "1",
-        limit   = uci:get("battery", "@charge[0]", "limit")  or "85",
-        resume  = uci:get("battery", "@charge[0]", "resume") or "80",
+        enabled = charge.enabled or "1",
+        limit   = charge.limit or "85",
+        resume  = charge.resume or "80",
+        save_error = save_error,
     }
 
     -- ---- runtime on battery -------------------------------------------------

@@ -1,0 +1,11 @@
+{
+  "luci-app-battery": {
+    "description": "Manage battery status and charge limits",
+    "read": {
+      "uci": ["battery"]
+    },
+    "write": {
+      "uci": ["battery"]
+    }
+  }
+}

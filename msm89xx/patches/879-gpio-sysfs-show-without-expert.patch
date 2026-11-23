@@ -1,0 +1,18 @@
+From: Codex <codex@users.noreply.github.com>
+Subject: [PATCH] gpio: expose GPIO_SYSFS without EXPERT
+
+The generic 6.12 config requests CONFIG_GPIO_SYSFS=y, but its Kconfig
+prompt is hidden unless EXPERT is enabled. Keep EXPERT disabled and make
+the deprecated sysfs option visible so the existing config can select it.
+
+---
+ drivers/gpio/Kconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
+--- a/drivers/gpio/Kconfig
++++ b/drivers/gpio/Kconfig
+@@ -62 +62 @@
+-	bool "/sys/class/gpio/... (sysfs interface)" if EXPERT
++	bool "/sys/class/gpio/... (sysfs interface)"
+*** End Patch

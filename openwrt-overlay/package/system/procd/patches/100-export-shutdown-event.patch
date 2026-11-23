@@ -1,0 +1,14 @@
+--- a/state.c
++++ b/state.c
+@@ -178,7 +178,11 @@ static void state_enter(void)
+ 	case STATE_SHUTDOWN:
+ 		/* Redirect output to the console for the users' benefit */
+ 		set_console();
+ 		LOG("- shutdown -\n");
++		setenv("PROCD_SHUTDOWN_EVENT",
++		       reboot_event == RB_POWER_OFF ? "poweroff" :
++		       reboot_event == RB_AUTOBOOT ? "reboot" : "halt", 1);
+ 		procd_inittab_run("shutdown");
++		unsetenv("PROCD_SHUTDOWN_EVENT");
+ 		sync();
+ 		break;

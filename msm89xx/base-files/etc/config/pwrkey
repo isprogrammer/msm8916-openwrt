@@ -1,0 +1,5 @@
+config global 'main'
+	option double_press_reboot '1'
+	option double_press_window_ms '800'
+	option short_press_action 'lcd-toggle'
+	option long_hold_s '4'

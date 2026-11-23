@@ -1,0 +1,17 @@
+{
+  "luci-app-lcd-status": {
+    "description": "Manage LCD status display settings",
+    "read": {
+      "uci": [
+        "lcdstatus",
+        "pwrkey"
+      ]
+    },
+    "write": {
+      "uci": [
+        "lcdstatus",
+        "pwrkey"
+      ]
+    }
+  }
+}
